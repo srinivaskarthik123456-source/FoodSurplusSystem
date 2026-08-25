@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import "./App.css";
 
-const API = "http://localhost:5000/api";
+// ==================================================
+// DEPLOYED BACKEND
+// ==================================================
+const API = "https://foodsurplussystem.onrender.com/api";
 
 // ==================================================
 // LOGIN COMPONENT
 // ==================================================
-
 function Login({ onLogin, goRegister, goAdminLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,16 +25,8 @@ function Login({ onLogin, goRegister, goAdminLogin }) {
         password,
       });
 
-      const loggedUser = response.data.user;
-
-      // Admin cannot enter through normal login
-      if (loggedUser.role === "admin") {
-        setMessage("Please use Admin Login for administrator access.");
-        return;
-      }
-
       setMessage("Login successful!");
-      onLogin(loggedUser);
+      onLogin(response.data.user);
     } catch (error) {
       setMessage(
         error.response?.data?.message || "Login failed"
@@ -43,20 +37,12 @@ function Login({ onLogin, goRegister, goAdminLogin }) {
   return (
     <div className="page-background login-bg">
       <div className="glass-card auth-card">
-
         <h1>Welcome Back</h1>
-        <p className="subtitle">
-          Login to FoodSurplus
-        </p>
+        <p className="subtitle">Login to FoodSurplus</p>
 
-        {message && (
-          <div className="message">
-            {message}
-          </div>
-        )}
+        {message && <div className="message">{message}</div>}
 
         <form onSubmit={handleSubmit}>
-
           <input
             type="email"
             placeholder="Email"
@@ -73,18 +59,13 @@ function Login({ onLogin, goRegister, goAdminLogin }) {
             required
           />
 
-          <button
-            className="primary-btn"
-            type="submit"
-          >
+          <button className="primary-btn" type="submit">
             Login
           </button>
-
         </form>
 
         <p className="bottom-text">
           Don't have an account?
-
           <button
             className="text-btn"
             onClick={goRegister}
@@ -93,99 +74,62 @@ function Login({ onLogin, goRegister, goAdminLogin }) {
           </button>
         </p>
 
-        <div className="admin-login-box">
-
-          <p>
-            Are you an administrator?
-          </p>
-
-          <button
-            className="admin-login-btn"
-            onClick={goAdminLogin}
-          >
-            🔐 Admin Login
-          </button>
-
-        </div>
-
+        <button
+          className="admin-login-btn"
+          onClick={goAdminLogin}
+        >
+          🔐 Admin Login
+        </button>
       </div>
     </div>
   );
 }
 
 // ==================================================
-// ADMIN LOGIN COMPONENT
+// ADMIN LOGIN
 // ==================================================
-
-function AdminLogin({ onAdminLogin, goLogin }) {
-
+function AdminLogin({ onLogin, goLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
   const handleSubmit = async (e) => {
-
     e.preventDefault();
     setMessage("");
 
     try {
+      const response = await axios.post(`${API}/auth/login`, {
+        email,
+        password,
+      });
 
-      const response = await axios.post(
-        `${API}/auth/login`,
-        {
-          email,
-          password,
-        }
-      );
-
-      const loggedUser = response.data.user;
-
-      // IMPORTANT ADMIN ROLE CHECK
-      if (loggedUser.role !== "admin") {
-
-        setMessage(
-          "Access denied. This account is not an administrator."
-        );
-
+      if (response.data.user?.role !== "admin") {
+        setMessage("Access denied. Admin account required.");
         return;
       }
 
       setMessage("Admin login successful!");
-
-      onAdminLogin(loggedUser);
-
+      onLogin(response.data.user);
     } catch (error) {
-
       setMessage(
-        error.response?.data?.message ||
-        "Invalid admin email or password"
+        error.response?.data?.message || "Admin login failed"
       );
     }
   };
 
   return (
-    <div className="page-background admin-login-bg">
-
+    <div className="page-background login-bg">
       <div className="glass-card auth-card">
-
-        <div className="admin-icon">
-          🔐
-        </div>
+        <div className="hero-icon">🔐</div>
 
         <h1>Admin Login</h1>
-
         <p className="subtitle">
           FoodSurplus Administration
         </p>
 
-        {message && (
-          <div className="message">
-            {message}
-          </div>
-        )}
+        {message && <div className="message">{message}</div>}
 
         <form onSubmit={handleSubmit}>
-
           <input
             type="email"
             placeholder="Admin Email"
@@ -202,30 +146,21 @@ function AdminLogin({ onAdminLogin, goLogin }) {
             required
           />
 
-          <button
-            className="primary-btn"
-            type="submit"
-          >
-            🔐 Admin Login
+          <button className="primary-btn" type="submit">
+            Admin Login
           </button>
-
         </form>
 
         <p className="bottom-text">
-
-          Not an administrator?
-
+          Regular user?
           <button
             className="text-btn"
             onClick={goLogin}
           >
             User Login
           </button>
-
         </p>
-
       </div>
-
     </div>
   );
 }
@@ -233,9 +168,7 @@ function AdminLogin({ onAdminLogin, goLogin }) {
 // ==================================================
 // REGISTER COMPONENT
 // ==================================================
-
 function Register({ goLogin }) {
-
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -248,7 +181,6 @@ function Register({ goLogin }) {
   const [message, setMessage] = useState("");
 
   const handleChange = (e) => {
-
     setForm({
       ...form,
       [e.target.name]: e.target.value,
@@ -256,12 +188,10 @@ function Register({ goLogin }) {
   };
 
   const handleSubmit = async (e) => {
-
     e.preventDefault();
     setMessage("");
 
     try {
-
       const response = await axios.post(
         `${API}/auth/register`,
         form
@@ -269,41 +199,29 @@ function Register({ goLogin }) {
 
       setMessage(
         response.data.message ||
-        "Registration successful!"
+          "Registration successful!"
       );
 
       setTimeout(() => {
         goLogin();
-      }, 1000);
-
+      }, 1200);
     } catch (error) {
-
       setMessage(
         error.response?.data?.message ||
-        "Registration failed"
+          "Registration failed"
       );
     }
   };
 
   return (
     <div className="page-background register-bg">
-
       <div className="glass-card auth-card">
-
         <h1>Create Account</h1>
+        <p className="subtitle">Join FoodSurplus</p>
 
-        <p className="subtitle">
-          Join FoodSurplus
-        </p>
-
-        {message && (
-          <div className="message">
-            {message}
-          </div>
-        )}
+        {message && <div className="message">{message}</div>}
 
         <form onSubmit={handleSubmit}>
-
           <input
             type="text"
             name="name"
@@ -347,7 +265,6 @@ function Register({ goLogin }) {
             value={form.password}
             onChange={handleChange}
             required
-            minLength="6"
           />
 
           <select
@@ -355,7 +272,6 @@ function Register({ goLogin }) {
             value={form.role}
             onChange={handleChange}
           >
-
             <option value="donor">
               Food Donor
             </option>
@@ -363,7 +279,6 @@ function Register({ goLogin }) {
             <option value="receiver">
               Food Receiver
             </option>
-
           </select>
 
           <button
@@ -372,24 +287,18 @@ function Register({ goLogin }) {
           >
             Create Account
           </button>
-
         </form>
 
         <p className="bottom-text">
-
           Already have an account?
-
           <button
             className="text-btn"
             onClick={goLogin}
           >
             Login
           </button>
-
         </p>
-
       </div>
-
     </div>
   );
 }
@@ -397,25 +306,19 @@ function Register({ goLogin }) {
 // ==================================================
 // HOME COMPONENT
 // ==================================================
-
 function Home({
   goLogin,
   goRegister,
   goAdminLogin,
 }) {
-
   return (
-
     <div className="home-page">
-
       <nav className="navbar">
-
         <div className="logo">
           🍽️ FoodSurplus
         </div>
 
         <div className="nav-buttons">
-
           <button onClick={goLogin}>
             Login
           </button>
@@ -428,41 +331,30 @@ function Home({
             className="admin-nav-btn"
             onClick={goAdminLogin}
           >
-            🔐 Admin Login
+            🔐 Admin
           </button>
-
         </div>
-
       </nav>
 
       <div className="hero">
-
         <div className="hero-overlay"></div>
 
         <div className="hero-content">
-
-          <div className="hero-icon">
-            🍲
-          </div>
+          <div className="hero-icon">🍲</div>
 
           <p className="tagline">
             SMART FOOD REDISTRIBUTION
           </p>
 
-          <h1>
-            Food Surplus System
-          </h1>
+          <h1>Food Surplus System</h1>
 
           <p className="hero-description">
-
-            Connecting surplus food with people who need it.
-            Together, we can reduce food waste and help
-            communities.
-
+            Connecting surplus food with people
+            who need it. Together, we can reduce
+            food waste and help communities.
           </p>
 
           <div className="hero-buttons">
-
             <button
               className="primary-btn large-btn"
               onClick={goRegister}
@@ -476,20 +368,9 @@ function Home({
             >
               Login
             </button>
-
           </div>
-
-          <button
-            className="admin-hero-btn"
-            onClick={goAdminLogin}
-          >
-            🔐 Administrator Login
-          </button>
-
         </div>
-
       </div>
-
     </div>
   );
 }
@@ -497,9 +378,7 @@ function Home({
 // ==================================================
 // DONOR DASHBOARD
 // ==================================================
-
 function DonorDashboard({ user, logout }) {
-
   const [food, setFood] = useState({
     foodName: "",
     foodType: "Veg",
@@ -513,7 +392,6 @@ function DonorDashboard({ user, logout }) {
   const [message, setMessage] = useState("");
 
   const handleChange = (e) => {
-
     setFood({
       ...food,
       [e.target.name]: e.target.value,
@@ -521,12 +399,10 @@ function DonorDashboard({ user, logout }) {
   };
 
   const addFood = async (e) => {
-
     e.preventDefault();
     setMessage("");
 
     try {
-
       await axios.post(`${API}/food`, {
         donorId: user.id || user._id,
         ...food,
@@ -546,28 +422,22 @@ function DonorDashboard({ user, logout }) {
         location: "",
         expiryTime: "",
       });
-
     } catch (error) {
-
       setMessage(
         error.response?.data?.message ||
-        "Failed to donate food"
+          "Failed to donate food"
       );
     }
   };
 
   return (
-
     <div className="dashboard-page donor-bg">
-
       <nav className="dashboard-nav">
-
         <div className="logo">
           🍽️ FoodSurplus
         </div>
 
         <div>
-
           <span className="role-badge">
             DONOR
           </span>
@@ -575,26 +445,18 @@ function DonorDashboard({ user, logout }) {
           <button onClick={logout}>
             Logout
           </button>
-
         </div>
-
       </nav>
 
       <div className="dashboard-content">
-
-        <h1>
-          Donor Dashboard
-        </h1>
+        <h1>Donor Dashboard</h1>
 
         <p className="welcome">
           Welcome, <strong>{user.name}</strong>
         </p>
 
         <div className="glass-card dashboard-card">
-
-          <h2>
-            🍱 Donate Surplus Food
-          </h2>
+          <h2>🍱 Donate Surplus Food</h2>
 
           {message && (
             <div className="message">
@@ -603,7 +465,6 @@ function DonorDashboard({ user, logout }) {
           )}
 
           <form onSubmit={addFood}>
-
             <input
               name="foodName"
               placeholder="Food Name"
@@ -617,19 +478,13 @@ function DonorDashboard({ user, logout }) {
               value={food.foodType}
               onChange={handleChange}
             >
-
-              <option value="Veg">
-                Veg
-              </option>
-
+              <option value="Veg">Veg</option>
               <option value="Non-Veg">
                 Non-Veg
               </option>
-
             </select>
 
             <div className="two-column">
-
               <input
                 type="number"
                 name="quantity"
@@ -644,7 +499,6 @@ function DonorDashboard({ user, logout }) {
                 value={food.unit}
                 onChange={handleChange}
               >
-
                 <option value="plates">
                   Plates
                 </option>
@@ -660,9 +514,7 @@ function DonorDashboard({ user, logout }) {
                 <option value="packets">
                   Packets
                 </option>
-
               </select>
-
             </div>
 
             <input
@@ -694,13 +546,9 @@ function DonorDashboard({ user, logout }) {
             >
               Donate Food
             </button>
-
           </form>
-
         </div>
-
       </div>
-
     </div>
   );
 }
@@ -708,9 +556,7 @@ function DonorDashboard({ user, logout }) {
 // ==================================================
 // RECEIVER DASHBOARD
 // ==================================================
-
 function ReceiverDashboard({ user, logout }) {
-
   const [foods, setFoods] = useState([]);
   const [claimed, setClaimed] = useState([]);
   const [tab, setTab] = useState("available");
@@ -719,54 +565,40 @@ function ReceiverDashboard({ user, logout }) {
   const userId = user.id || user._id;
 
   const loadFoods = async () => {
-
     try {
-
-      const response =
-        await axios.get(`${API}/food`);
+      const response = await axios.get(
+        `${API}/food`
+      );
 
       setFoods(
         response.data.foods || []
       );
-
     } catch (error) {
-
       console.log(error);
-
     }
   };
 
   const loadClaimed = async () => {
-
     try {
-
-      const response =
-        await axios.get(
-          `${API}/food/receiver/${userId}`
-        );
+      const response = await axios.get(
+        `${API}/food/receiver/${userId}`
+      );
 
       setClaimed(
         response.data.foods || []
       );
-
     } catch (error) {
-
       console.log(error);
-
     }
   };
 
   useEffect(() => {
-
     loadFoods();
     loadClaimed();
-
   }, []);
 
   const claimFood = async (foodId) => {
-
     try {
-
       await axios.put(
         `${API}/food/${foodId}/claim`,
         {
@@ -780,28 +612,22 @@ function ReceiverDashboard({ user, logout }) {
 
       loadFoods();
       loadClaimed();
-
     } catch (error) {
-
       setMessage(
         error.response?.data?.message ||
-        "Failed to claim food"
+          "Failed to claim food"
       );
     }
   };
 
   return (
-
     <div className="dashboard-page receiver-bg">
-
       <nav className="dashboard-nav">
-
         <div className="logo">
           🍽️ FoodSurplus
         </div>
 
         <div>
-
           <span className="role-badge">
             RECEIVER
           </span>
@@ -809,16 +635,11 @@ function ReceiverDashboard({ user, logout }) {
           <button onClick={logout}>
             Logout
           </button>
-
         </div>
-
       </nav>
 
       <div className="dashboard-content">
-
-        <h1>
-          Receiver Dashboard
-        </h1>
+        <h1>Receiver Dashboard</h1>
 
         <p className="welcome">
           Welcome, <strong>{user.name}</strong>
@@ -831,7 +652,6 @@ function ReceiverDashboard({ user, logout }) {
         )}
 
         <div className="tabs">
-
           <button
             className={
               tab === "available"
@@ -857,41 +677,28 @@ function ReceiverDashboard({ user, logout }) {
           >
             My Claimed Food
           </button>
-
         </div>
 
         {tab === "available" && (
-
           <div className="food-grid">
-
             {foods.length === 0 ? (
-
               <div className="glass-card empty-card">
-
                 <h2>🍽️</h2>
-
                 <p>
                   No food currently available.
                 </p>
-
               </div>
-
             ) : (
-
               foods.map((item) => (
-
                 <div
                   className="glass-card food-card"
                   key={item._id}
                 >
-
                   <div className="food-icon">
                     🍱
                   </div>
 
-                  <h2>
-                    {item.foodName}
-                  </h2>
+                  <h2>{item.foodName}</h2>
 
                   <p>
                     <strong>Type:</strong>{" "}
@@ -900,7 +707,8 @@ function ReceiverDashboard({ user, logout }) {
 
                   <p>
                     <strong>Quantity:</strong>{" "}
-                    {item.quantity} {item.unit}
+                    {item.quantity}{" "}
+                    {item.unit}
                   </p>
 
                   <p>
@@ -922,98 +730,58 @@ function ReceiverDashboard({ user, logout }) {
                   >
                     Claim Food
                   </button>
-
-                  {item.mapsUrl && (
-                    <a
-                      href={item.mapsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="map-btn"
-                    >
-                      📍 Get Directions
-                    </a>
-                  )}
-
                 </div>
-
               ))
-
             )}
-
           </div>
-
         )}
 
         {tab === "claimed" && (
-
           <div className="food-grid">
-
             {claimed.length === 0 ? (
-
               <div className="glass-card empty-card">
-
                 <h2>📦</h2>
 
                 <p>
                   No claimed food yet.
                 </p>
-
               </div>
-
             ) : (
-
               claimed.map((item) => (
-
                 <div
                   className="glass-card food-card"
                   key={item._id}
                 >
-
                   <div className="food-icon">
                     ✅
                   </div>
 
-                  <h2>
-                    {item.foodName}
-                  </h2>
+                  <h2>{item.foodName}</h2>
 
                   <p>
-                    <strong>Quantity:</strong>{" "}
-                    {item.quantity} {item.unit}
+                    <strong>
+                      Quantity:
+                    </strong>{" "}
+                    {item.quantity}{" "}
+                    {item.unit}
                   </p>
 
                   <p>
-                    <strong>Location:</strong>{" "}
+                    <strong>
+                      Location:
+                    </strong>{" "}
                     {item.location}
                   </p>
 
                   <p className="claimed-text">
                     Successfully Claimed
                   </p>
-
-                  {item.mapsUrl && (
-                    <a
-                      href={item.mapsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="map-btn"
-                    >
-                      📍 Get Directions
-                    </a>
-                  )}
-
                 </div>
-
               ))
-
             )}
-
           </div>
-
         )}
-
       </div>
-
     </div>
   );
 }
@@ -1021,16 +789,12 @@ function ReceiverDashboard({ user, logout }) {
 // ==================================================
 // ADMIN DASHBOARD
 // ==================================================
-
 function AdminDashboard({ user, logout }) {
-
   const [users, setUsers] = useState([]);
   const [foods, setFoods] = useState([]);
 
   const loadData = async () => {
-
     try {
-
       const userResponse =
         await axios.get(`${API}/users`);
 
@@ -1039,37 +803,28 @@ function AdminDashboard({ user, logout }) {
       );
 
       const foodResponse =
-        await axios.get(`${API}/admin/food`);
+        await axios.get(`${API}/food`);
 
       setFoods(
         foodResponse.data.foods || []
       );
-
     } catch (error) {
-
       console.log(error);
-
     }
   };
 
   useEffect(() => {
-
     loadData();
-
   }, []);
 
   return (
-
     <div className="dashboard-page admin-bg">
-
       <nav className="dashboard-nav">
-
         <div className="logo">
           🍽️ FoodSurplus
         </div>
 
         <div>
-
           <span className="role-badge">
             ADMIN
           </span>
@@ -1077,101 +832,62 @@ function AdminDashboard({ user, logout }) {
           <button onClick={logout}>
             Logout
           </button>
-
         </div>
-
       </nav>
 
       <div className="dashboard-content">
-
-        <h1>
-          Admin Dashboard
-        </h1>
+        <h1>Admin Dashboard</h1>
 
         <p className="welcome">
           Welcome, <strong>{user.name}</strong>
         </p>
 
         <div className="stats-grid">
-
           <div className="glass-card stat-card">
-
             <span>👥</span>
-
-            <h2>
-              {users.length}
-            </h2>
-
-            <p>
-              Total Users
-            </p>
-
+            <h2>{users.length}</h2>
+            <p>Total Users</p>
           </div>
 
           <div className="glass-card stat-card">
-
             <span>🍱</span>
-
-            <h2>
-              {foods.length}
-            </h2>
-
-            <p>
-              Total Food
-            </p>
-
+            <h2>{foods.length}</h2>
+            <p>Total Food</p>
           </div>
 
           <div className="glass-card stat-card">
-
             <span>🥕</span>
 
             <h2>
-              {
-                users.filter(
-                  (u) => u.role === "donor"
-                ).length
-              }
+              {users.filter(
+                (u) =>
+                  u.role === "donor"
+              ).length}
             </h2>
 
-            <p>
-              Donors
-            </p>
-
+            <p>Donors</p>
           </div>
 
           <div className="glass-card stat-card">
-
             <span>🤝</span>
 
             <h2>
-              {
-                users.filter(
-                  (u) => u.role === "receiver"
-                ).length
-              }
+              {users.filter(
+                (u) =>
+                  u.role === "receiver"
+              ).length}
             </h2>
 
-            <p>
-              Receivers
-            </p>
-
+            <p>Receivers</p>
           </div>
-
         </div>
 
         <div className="glass-card table-card">
-
-          <h2>
-            Registered Users
-          </h2>
+          <h2>Registered Users</h2>
 
           <div className="table-wrapper">
-
             <table>
-
               <thead>
-
                 <tr>
                   <th>Name</th>
                   <th>Email</th>
@@ -1179,59 +895,33 @@ function AdminDashboard({ user, logout }) {
                   <th>Address</th>
                   <th>Role</th>
                 </tr>
-
               </thead>
 
               <tbody>
-
                 {users.map((u) => (
-
                   <tr key={u._id}>
-
-                    <td>
-                      {u.name}
-                    </td>
-
-                    <td>
-                      {u.email}
-                    </td>
-
+                    <td>{u.name}</td>
+                    <td>{u.email}</td>
                     <td>
                       {u.phone || "-"}
                     </td>
-
                     <td>
                       {u.address || "-"}
                     </td>
-
-                    <td>
-                      {u.role}
-                    </td>
-
+                    <td>{u.role}</td>
                   </tr>
-
                 ))}
-
               </tbody>
-
             </table>
-
           </div>
-
         </div>
 
         <div className="glass-card table-card">
-
-          <h2>
-            Food Records
-          </h2>
+          <h2>Food Records</h2>
 
           <div className="table-wrapper">
-
             <table>
-
               <thead>
-
                 <tr>
                   <th>Food</th>
                   <th>Type</th>
@@ -1239,15 +929,11 @@ function AdminDashboard({ user, logout }) {
                   <th>Location</th>
                   <th>Status</th>
                 </tr>
-
               </thead>
 
               <tbody>
-
                 {foods.map((food) => (
-
                   <tr key={food._id}>
-
                     <td>
                       {food.foodName}
                     </td>
@@ -1257,7 +943,8 @@ function AdminDashboard({ user, logout }) {
                     </td>
 
                     <td>
-                      {food.quantity} {food.unit}
+                      {food.quantity}{" "}
+                      {food.unit}
                     </td>
 
                     <td>
@@ -1265,23 +952,15 @@ function AdminDashboard({ user, logout }) {
                     </td>
 
                     <td>
-                      {food.status}
+                      {food.status || "available"}
                     </td>
-
                   </tr>
-
                 ))}
-
               </tbody>
-
             </table>
-
           </div>
-
         </div>
-
       </div>
-
     </div>
   );
 }
@@ -1289,50 +968,26 @@ function AdminDashboard({ user, logout }) {
 // ==================================================
 // MAIN APP
 // ==================================================
-
 function App() {
-
   const [page, setPage] = useState("home");
   const [user, setUser] = useState(null);
 
-  // Normal user login
   const handleLogin = (loggedUser) => {
-
-    if (loggedUser.role === "admin") {
-
-      setPage("admin");
-      setUser(loggedUser);
-      return;
-    }
-
     setUser(loggedUser);
 
-    if (loggedUser.role === "donor") {
-
-      setPage("donor");
-
+    if (loggedUser.role === "admin") {
+      setPage("admin");
     } else if (
-      loggedUser.role === "receiver"
+      loggedUser.role === "donor"
     ) {
-
-      setPage("receiver");
-
+      setPage("donor");
     } else {
-
-      setPage("home");
-
+      setPage("receiver");
     }
   };
 
-  // Separate Admin Login
   const handleAdminLogin = (loggedUser) => {
-
     if (loggedUser.role !== "admin") {
-
-      alert(
-        "Access denied. Admin account required."
-      );
-
       return;
     }
 
@@ -1341,17 +996,14 @@ function App() {
   };
 
   const logout = () => {
-
     setUser(null);
     setPage("home");
   };
 
   // ==================================================
-  // PAGE ROUTING
+  // LOGIN
   // ==================================================
-
   if (page === "login") {
-
     return (
       <Login
         onLogin={handleLogin}
@@ -1365,11 +1017,13 @@ function App() {
     );
   }
 
+  // ==================================================
+  // ADMIN LOGIN
+  // ==================================================
   if (page === "admin-login") {
-
     return (
       <AdminLogin
-        onAdminLogin={handleAdminLogin}
+        onLogin={handleAdminLogin}
         goLogin={() =>
           setPage("login")
         }
@@ -1377,8 +1031,10 @@ function App() {
     );
   }
 
+  // ==================================================
+  // REGISTER
+  // ==================================================
   if (page === "register") {
-
     return (
       <Register
         goLogin={() =>
@@ -1388,12 +1044,13 @@ function App() {
     );
   }
 
+  // ==================================================
+  // DONOR
+  // ==================================================
   if (
     page === "donor" &&
-    user &&
-    user.role === "donor"
+    user
   ) {
-
     return (
       <DonorDashboard
         user={user}
@@ -1402,12 +1059,13 @@ function App() {
     );
   }
 
+  // ==================================================
+  // RECEIVER
+  // ==================================================
   if (
     page === "receiver" &&
-    user &&
-    user.role === "receiver"
+    user
   ) {
-
     return (
       <ReceiverDashboard
         user={user}
@@ -1416,12 +1074,13 @@ function App() {
     );
   }
 
+  // ==================================================
+  // ADMIN
+  // ==================================================
   if (
     page === "admin" &&
-    user &&
-    user.role === "admin"
+    user
   ) {
-
     return (
       <AdminDashboard
         user={user}
@@ -1430,6 +1089,9 @@ function App() {
     );
   }
 
+  // ==================================================
+  // HOME
+  // ==================================================
   return (
     <Home
       goLogin={() =>
