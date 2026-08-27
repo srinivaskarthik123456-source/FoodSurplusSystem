@@ -12,4 +12,6 @@ FOODSURPLUS PROJECT START
    npm run dev
 
 4. Browser:
-   Local URL shown by Vite
+   Local URL shown by Vitenode_modules/
+frontend/node_modules/
+backend/node_modules/
