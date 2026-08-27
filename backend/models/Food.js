@@ -35,9 +35,21 @@ const foodSchema = new mongoose.Schema(
             default: ""
         },
 
+        // Donor's readable location
         location: {
             type: String,
             required: true
+        },
+
+        // Donor's exact coordinates
+        latitude: {
+            type: Number,
+            default: null
+        },
+
+        longitude: {
+            type: Number,
+            default: null
         },
 
         expiryTime: {
@@ -50,6 +62,7 @@ const foodSchema = new mongoose.Schema(
             enum: [
                 "available",
                 "claimed",
+                "cancelled",
                 "expired",
                 "distributed"
             ],
@@ -65,6 +78,11 @@ const foodSchema = new mongoose.Schema(
         claimedAt: {
             type: Date,
             default: null
+        },
+
+        cancelledAt: {
+            type: Date,
+            default: null
         }
     },
 
@@ -73,8 +91,4 @@ const foodSchema = new mongoose.Schema(
     }
 );
 
-module.exports =
-    mongoose.model(
-        "Food",
-        foodSchema
-    );
+module.exports = mongoose.model("Food", foodSchema);

@@ -33,10 +33,12 @@ const userSchema = new mongoose.Schema(
             required: true
         },
 
+        // One account can now both donate and receive.
+        // Role is kept for admin identification.
         role: {
             type: String,
-            enum: ["donor", "receiver", "admin"],
-            default: "donor"
+            enum: ["user", "donor", "receiver", "admin"],
+            default: "user"
         }
     },
     {
