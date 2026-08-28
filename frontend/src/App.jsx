@@ -1,32 +1,101 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import "./App.css";
-
-const API = "https://foodsurplussystem.onrender.com/api";
-
 // ==================================================
-// MAP LOCATION BUTTONS
+// API
 // ==================================================
 
-function ViewLocation({ location }) {
-  if (!location) {
-    return null;
-  }
+const API =
+  "https://foodsurplussystem.onrender.com/api";
 
-  const openGoogleMaps = () => {
-    const url =
-      "https://www.google.com/maps/search/?api=1&query=" +
-      encodeURIComponent(location);
+// ==================================================
+// BACKEND WARM-UP
+// ==================================================
+
+function useBackendWarmup() {
+  const [backendReady, setBackendReady] =
+    useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const warmUpBackend = async () => {
+      try {
+        console.log(
+          "Warming up FoodSurplus backend..."
+        );
+
+        await axios.get(API, {
+          timeout: 15000,
+        });
+
+        if (!cancelled) {
+          setBackendReady(true);
+        }
+
+        console.log(
+          "FoodSurplus backend is ready."
+        );
+      } catch (error) {
+        console.log(
+          "Backend warm-up:",
+          error.message
+        );
+      }
+    };
+
+    warmUpBackend();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return backendReady;
+}
+
+// ==================================================
+// GOOGLE MAPS ROUTE
+// CURRENT LOCATION -> FOOD LOCATION
+// ==================================================
+
+function ViewLocation({
+  location,
+  userCoords,
+}) {
+  const [opening, setOpening] =
+    useState(false);
+
+  const openRoute = () => {
+    if (!location || !location.trim()) {
+      alert("Food location is not available.");
+      return;
+    }
+
+    setOpening(true);
+
+    const destination =
+      encodeURIComponent(location.trim());
+
+    let url = "";
+
+    if (userCoords) {
+      url =
+        "https://www.google.com/maps/dir/?api=1" +
+        `&origin=${userCoords.lat},${userCoords.lon}` +
+        `&destination=${destination}` +
+        "&travelmode=driving";
+    } else {
+      url =
+        "https://www.google.com/maps/search/?api=1&query=" +
+        destination;
+    }
 
     window.open(url, "_blank");
-  };
 
-  const openAppleMaps = () => {
-    const url =
-      "https://maps.apple.com/?address=" +
-      encodeURIComponent(location);
-
-    window.open(url, "_blank");
+    setTimeout(() => {
+      setOpening(false);
+    }, 500);
   };
 
   return (
@@ -34,24 +103,17 @@ function ViewLocation({ location }) {
       <button
         type="button"
         className="primary-btn"
-        onClick={openGoogleMaps}
-        style={{
-          width: "100%",
-          marginBottom: "8px",
-        }}
-      >
-        📍 Open in Google Maps
-      </button>
-
-      <button
-        type="button"
-        className="secondary-btn"
-        onClick={openAppleMaps}
+        onClick={openRoute}
         style={{
           width: "100%",
         }}
+        disabled={opening}
       >
-        🍎 Open in Apple Maps
+        {opening
+          ? "🔄 Opening Maps..."
+          : userCoords
+          ? "📍 View Route from My Location"
+          : "📍 Open Food Location"}
       </button>
     </div>
   );
@@ -62,10 +124,13 @@ function ViewLocation({ location }) {
 // ==================================================
 
 function useCurrentLocation() {
-  const [userCoords, setUserCoords] = useState(null);
-  const [locationError, setLocationError] = useState("");
+  const [userCoords, setUserCoords] =
+    useState(null);
 
-  useEffect(() => {
+  const [locationError, setLocationError] =
+    useState("");
+
+  const getLocation = useCallback(() => {
     if (!navigator.geolocation) {
       setLocationError(
         "Geolocation is not supported by this browser."
@@ -83,19 +148,22 @@ function useCurrentLocation() {
         setLocationError("");
       },
       (error) => {
-        console.log("Location permission error:", error);
+        console.log(
+          "Location permission error:",
+          error
+        );
 
         let message =
           "Please allow location access to calculate distance and travel time.";
 
         if (error.code === 1) {
           message =
-            "Location permission denied. Please allow location access.";
+            "Location permission denied. Please allow location access in browser settings.";
         }
 
         if (error.code === 2) {
           message =
-            "Your current location could not be detected. Please check your browser location settings.";
+            "Your current location could not be detected. Please check your device location.";
         }
 
         if (error.code === 3) {
@@ -113,41 +181,33 @@ function useCurrentLocation() {
     );
   }, []);
 
+  useEffect(() => {
+    getLocation();
+  }, [getLocation]);
+
   return {
     userCoords,
     locationError,
+    refreshLocation: getLocation,
   };
 }
 
 // ==================================================
-// FREE ROAD DISTANCE + TRAVEL TIME
-// ==================================================
-// NO GOOGLE API KEY
-// NO GOOGLE CLOUD BILLING
-//
-// Food location is only TEXT.
-// Example:
-// "Rajahmundry"
-// "Tirupati"
-// "Hyderabad Tank Bund Telangana"
-//
-// Process:
-//
-// User GPS coordinates
-//       ↓
-// Free Geocoding
-//       ↓
-// Typed food location coordinates
-//       ↓
-// Free road routing
-//       ↓
-// Distance + Travel Time
+// DISTANCE + TRAVEL TIME
+// CURRENT GPS -> FOOD LOCATION
 // ==================================================
 
-function DistanceInfo({ location, userCoords }) {
+function DistanceInfo({
+  location,
+  userCoords,
+}) {
   const [info, setInfo] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [errorMessage, setErrorMessage] =
+    useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -166,63 +226,70 @@ function DistanceInfo({ location, userCoords }) {
       setErrorMessage("");
 
       try {
-        // ==================================================
-        // STEP 1
-        // CONVERT TYPED LOCATION INTO COORDINATES
-        // ==================================================
+        // ------------------------------------------
+        // STEP 1: GEOCODE FOOD LOCATION
+        // ------------------------------------------
 
-        const geocodeResponse = await axios.get(
-          "https://nominatim.openstreetmap.org/search",
-          {
-            params: {
-              q: location.trim(),
-              format: "json",
-              limit: 1,
-              addressdetails: 1,
-            },
-            headers: {
-              Accept: "application/json",
-            },
-          }
-        );
+        const geocodeResponse =
+          await axios.get(
+            "https://nominatim.openstreetmap.org/search",
+            {
+              params: {
+                q: location.trim(),
+                format: "json",
+                limit: 1,
+                addressdetails: 1,
+              },
+              headers: {
+                Accept:
+                  "application/json",
+              },
+              timeout: 15000,
+            }
+          );
 
         if (
           !geocodeResponse.data ||
           geocodeResponse.data.length === 0
         ) {
           throw new Error(
-            `Location "${location}" could not be found. Please enter a more complete location.`
+            "Food location could not be found. Please enter a more complete location."
           );
         }
 
-        const destination = geocodeResponse.data[0];
+        const destination =
+          geocodeResponse.data[0];
 
-        const destinationLat = Number(destination.lat);
-        const destinationLon = Number(destination.lon);
+        const destinationLat =
+          Number(destination.lat);
+
+        const destinationLon =
+          Number(destination.lon);
 
         if (
           Number.isNaN(destinationLat) ||
           Number.isNaN(destinationLon)
         ) {
           throw new Error(
-            "Invalid destination coordinates."
+            "Invalid food location coordinates."
           );
         }
 
-        // ==================================================
-        // STEP 2
-        // FREE ROAD ROUTING
-        // ==================================================
+        // ------------------------------------------
+        // STEP 2: ROAD ROUTING
+        // ------------------------------------------
 
-        const routeResponse = await axios.get(
-          `https://router.project-osrm.org/route/v1/driving/${userCoords.lon},${userCoords.lat};${destinationLon},${destinationLat}`,
-          {
-            params: {
-              overview: "false",
-              steps: false,
-            },
-          }
-        );
+        const routeResponse =
+          await axios.get(
+            `https://router.project-osrm.org/route/v1/driving/${userCoords.lon},${userCoords.lat};${destinationLon},${destinationLat}`,
+            {
+              params: {
+                overview: "false",
+                steps: false,
+              },
+              timeout: 15000,
+            }
+          );
 
         if (
           !routeResponse.data ||
@@ -231,63 +298,65 @@ function DistanceInfo({ location, userCoords }) {
           routeResponse.data.routes.length === 0
         ) {
           throw new Error(
-            "Road route could not be calculated for this location."
+            "Road route could not be calculated."
           );
         }
 
-        const route = routeResponse.data.routes[0];
+        const route =
+          routeResponse.data.routes[0];
 
-        // ==================================================
+        // ------------------------------------------
         // DISTANCE
-        // ==================================================
+        // ------------------------------------------
 
-        const distanceKm = route.distance / 1000;
+        const distanceKm =
+          route.distance / 1000;
 
-        // ==================================================
+        // ------------------------------------------
         // TRAVEL TIME
-        // ==================================================
+        // ------------------------------------------
 
-        const totalMinutes = Math.round(
-          route.duration / 60
+        const totalMinutes = Math.max(
+          1,
+          Math.round(route.duration / 60)
         );
 
         let travelTime = "";
 
         if (totalMinutes < 60) {
-          travelTime = `${totalMinutes} mins`;
+          travelTime =
+            `${totalMinutes} mins`;
         } else {
-          const hours = Math.floor(
-            totalMinutes / 60
-          );
+          const hours =
+            Math.floor(totalMinutes / 60);
 
-          const minutes = totalMinutes % 60;
+          const minutes =
+            totalMinutes % 60;
 
           if (minutes === 0) {
-            travelTime = `${hours} hr`;
+            travelTime =
+              `${hours} hr`;
           } else {
-            travelTime = `${hours} hr ${minutes} mins`;
+            travelTime =
+              `${hours} hr ${minutes} mins`;
           }
         }
 
-        // ==================================================
-        // FOUND DESTINATION
-        // ==================================================
-
-        const destinationName =
-          destination.display_name || location;
-
         if (!cancelled) {
           setInfo({
-            distance: `${distanceKm.toFixed(2)} km`,
+            distance:
+              `${distanceKm.toFixed(2)} km`,
             time: travelTime,
-            destination: destinationName,
+            destination:
+              destination.display_name ||
+              location,
           });
 
           setErrorMessage("");
         }
       } catch (error) {
         console.log(
-          "Free distance calculation error:",
+          "Distance calculation error:",
           error
         );
 
@@ -315,10 +384,6 @@ function DistanceInfo({ location, userCoords }) {
     userCoords?.lon,
   ]);
 
-  // ==================================================
-  // CURRENT LOCATION WAITING
-  // ==================================================
-
   if (!userCoords) {
     return (
       <div
@@ -326,17 +391,14 @@ function DistanceInfo({ location, userCoords }) {
           marginTop: "10px",
           padding: "10px",
           borderRadius: "10px",
-          background: "rgba(255,255,255,0.12)",
+          background:
+            "rgba(255,255,255,0.12)",
         }}
       >
         📍 Getting your current location...
       </div>
     );
   }
-
-  // ==================================================
-  // LOADING
-  // ==================================================
 
   if (loading) {
     return (
@@ -345,18 +407,15 @@ function DistanceInfo({ location, userCoords }) {
           marginTop: "10px",
           padding: "10px",
           borderRadius: "10px",
-          background: "rgba(255,255,255,0.12)",
+          background:
+            "rgba(255,255,255,0.12)",
         }}
       >
-        🔄 Finding location and calculating road
-        distance...
+        🔄 Calculating road distance and travel
+        time...
       </div>
     );
   }
-
-  // ==================================================
-  // ERROR
-  // ==================================================
 
   if (errorMessage) {
     return (
@@ -365,7 +424,8 @@ function DistanceInfo({ location, userCoords }) {
           marginTop: "10px",
           padding: "10px",
           borderRadius: "10px",
-          background: "rgba(255,255,255,0.12)",
+          background:
+            "rgba(255,255,255,0.12)",
         }}
       >
         ⚠️ {errorMessage}
@@ -373,17 +433,9 @@ function DistanceInfo({ location, userCoords }) {
     );
   }
 
-  // ==================================================
-  // NO RESULT
-  // ==================================================
-
   if (!info) {
     return null;
   }
-
-  // ==================================================
-  // RESULT
-  // ==================================================
 
   return (
     <div
@@ -391,7 +443,8 @@ function DistanceInfo({ location, userCoords }) {
         marginTop: "10px",
         padding: "12px",
         borderRadius: "10px",
-        background: "rgba(255,255,255,0.15)",
+        background:
+          "rgba(255,255,255,0.15)",
         lineHeight: "1.8",
       }}
     >
@@ -421,6 +474,465 @@ function DistanceInfo({ location, userCoords }) {
 }
 
 // ==================================================
+// NOTIFICATIONS
+// ==================================================
+
+function Notifications({
+  userId,
+  onClose,
+}) {
+  const [notifications, setNotifications] =
+    useState([]);
+
+  const [unreadCount, setUnreadCount] =
+    useState(0);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  const loadNotifications =
+    useCallback(async () => {
+      if (!userId) {
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError("");
+
+        const response =
+          await axios.get(
+            `${API}/notifications/${userId}`,
+            {
+              timeout: 15000,
+            }
+          );
+
+        const list =
+          response.data?.notifications ||
+          [];
+
+        setNotifications(list);
+
+        setUnreadCount(
+          response.data?.unreadCount ??
+            list.filter(
+              (item) => !item.read
+            ).length
+        );
+      } catch (error) {
+        console.log(
+          "Notification load error:",
+          error
+        );
+
+        setError(
+          error.response?.data?.message ||
+            "Failed to load notifications"
+        );
+      } finally {
+        setLoading(false);
+      }
+    }, [userId]);
+
+  useEffect(() => {
+    loadNotifications();
+
+    // ------------------------------------------
+    // AUTO REFRESH EVERY 15 SECONDS
+    // ------------------------------------------
+
+    const interval =
+      setInterval(
+        loadNotifications,
+        15000
+      );
+
+    return () =>
+      clearInterval(interval);
+  }, [loadNotifications]);
+
+  const markOneRead = async (
+    notificationId
+  ) => {
+    try {
+      await axios.put(
+        `${API}/notifications/${notificationId}/read`,
+        {},
+        {
+          timeout: 15000,
+        }
+      );
+
+      setNotifications(
+        (previous) =>
+          previous.map((item) =>
+            String(item._id) ===
+            String(notificationId)
+              ? {
+                  ...item,
+                  read: true,
+                }
+              : item
+          )
+      );
+
+      setUnreadCount(
+        (previous) =>
+          Math.max(0, previous - 1)
+      );
+    } catch (error) {
+      console.log(
+        "Mark notification read error:",
+        error
+      );
+    }
+  };
+
+  const markAllRead = async () => {
+    try {
+      await axios.put(
+        `${API}/notifications/${userId}/read-all`,
+        {},
+        {
+          timeout: 15000,
+        }
+      );
+
+      setNotifications(
+        (previous) =>
+          previous.map((item) => ({
+            ...item,
+            read: true,
+          }))
+      );
+
+      setUnreadCount(0);
+    } catch (error) {
+      console.log(
+        "Mark all notifications error:",
+        error
+      );
+    }
+  };
+
+  const deleteNotification = async (
+    notificationId
+  ) => {
+    try {
+      const item =
+        notifications.find(
+          (notification) =>
+            String(notification._id) ===
+            String(notificationId)
+        );
+
+      await axios.delete(
+        `${API}/notifications/${notificationId}`,
+        {
+          timeout: 15000,
+        }
+      );
+
+      setNotifications(
+        (previous) =>
+          previous.filter(
+            (notification) =>
+              String(notification._id) !==
+              String(notificationId)
+          )
+      );
+
+      if (item && !item.read) {
+        setUnreadCount(
+          (previous) =>
+            Math.max(0, previous - 1)
+        );
+      }
+    } catch (error) {
+      console.log(
+        "Delete notification error:",
+        error
+      );
+    }
+  };
+
+  const getNotificationIcon = (
+    type
+  ) => {
+    switch (type) {
+      case "claim":
+        return "🤝";
+
+      case "pickup":
+        return "📦";
+
+      case "cancel":
+        return "❌";
+
+      case "distribution":
+        return "✅";
+
+      default:
+        return "🔔";
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) {
+      return "";
+    }
+
+    try {
+      return new Date(
+        date
+      ).toLocaleString();
+    } catch {
+      return "";
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: "75px",
+        right: "20px",
+        width: "min(420px, calc(100vw - 40px))",
+        maxHeight: "75vh",
+        overflowY: "auto",
+        zIndex: 9999,
+        padding: "18px",
+        borderRadius: "18px",
+        background:
+          "rgba(20,20,30,0.97)",
+        backdropFilter:
+          "blur(18px)",
+        boxShadow:
+          "0 15px 40px rgba(0,0,0,0.35)",
+        border:
+          "1px solid rgba(255,255,255,0.15)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent:
+            "space-between",
+          alignItems: "center",
+          marginBottom: "15px",
+          gap: "10px",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+          }}
+        >
+          🔔 Notifications
+        </h2>
+
+        <button
+          onClick={onClose}
+          style={{
+            border: "none",
+            background:
+              "rgba(255,255,255,0.12)",
+            color: "inherit",
+            borderRadius: "8px",
+            padding: "7px 10px",
+            cursor: "pointer",
+          }}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent:
+            "space-between",
+          alignItems: "center",
+          marginBottom: "15px",
+          gap: "10px",
+        }}
+      >
+        <span>
+          {unreadCount > 0
+            ? `${unreadCount} unread`
+            : "All notifications read"}
+        </span>
+
+        {unreadCount > 0 && (
+          <button
+            className="secondary-btn"
+            onClick={markAllRead}
+          >
+            ✓ Mark all as read
+          </button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="message">
+          🔄 Loading notifications...
+        </div>
+      ) : error ? (
+        <div className="message">
+          ⚠️ {error}
+        </div>
+      ) : notifications.length ===
+        0 ? (
+        <div
+          style={{
+            padding: "25px",
+            textAlign: "center",
+            opacity: 0.8,
+          }}
+        >
+          <div
+            style={{
+              fontSize: "40px",
+              marginBottom: "10px",
+            }}
+          >
+            🔕
+          </div>
+
+          <p>
+            No notifications yet.
+          </p>
+        </div>
+      ) : (
+        notifications.map(
+          (notification) => (
+            <div
+              key={notification._id}
+              style={{
+                padding: "14px",
+                marginBottom: "10px",
+                borderRadius: "12px",
+                background:
+                  notification.read
+                    ? "rgba(255,255,255,0.06)"
+                    : "rgba(59,130,246,0.20)",
+                border:
+                  notification.read
+                    ? "1px solid rgba(255,255,255,0.08)"
+                    : "1px solid rgba(59,130,246,0.40)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "25px",
+                  }}
+                >
+                  {getNotificationIcon(
+                    notification.type
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    flex: 1,
+                  }}
+                >
+                  <strong>
+                    {notification.title}
+                  </strong>
+
+                  {!notification.read && (
+                    <span
+                      style={{
+                        marginLeft: "8px",
+                        fontSize: "11px",
+                        padding:
+                          "3px 7px",
+                        borderRadius:
+                          "20px",
+                        background:
+                          "#3b82f6",
+                      }}
+                    >
+                      NEW
+                    </span>
+                  )}
+
+                  <p
+                    style={{
+                      margin:
+                        "7px 0",
+                    }}
+                  >
+                    {
+                      notification.message
+                    }
+                  </p>
+
+                  <small
+                    style={{
+                      opacity: 0.65,
+                    }}
+                  >
+                    {formatDate(
+                      notification.createdAt
+                    )}
+                  </small>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "7px",
+                      marginTop: "10px",
+                      flexWrap:
+                        "wrap",
+                    }}
+                  >
+                    {!notification.read && (
+                      <button
+                        className="secondary-btn"
+                        onClick={() =>
+                          markOneRead(
+                            notification._id
+                          )
+                        }
+                      >
+                        ✓ Read
+                      </button>
+                    )}
+
+                    <button
+                      className="admin-login-btn"
+                      onClick={() =>
+                        deleteNotification(
+                          notification._id
+                        )
+                      }
+                    >
+                      🗑 Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        )
+      )}
+    </div>
+  );
+}
+
+// ==================================================
 // LOGIN
 // ==================================================
 
@@ -429,36 +941,76 @@ function Login({
   goRegister,
   goAdminLogin,
 }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [email, setEmail] =
+    useState("");
+
+  const [password, setPassword] =
+    useState("");
+
+  const [message, setMessage] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (loading) {
+      return;
+    }
+
     setMessage("");
+    setLoading(true);
 
     try {
-      const response = await axios.post(
-        `${API}/auth/login`,
-        {
-          email,
-          password,
-        }
+      const response =
+        await axios.post(
+          `${API}/auth/login`,
+          {
+            email: email.trim(),
+            password,
+          },
+          {
+            timeout: 15000,
+          }
+        );
+
+      if (
+        response.data &&
+        response.data.user
+      ) {
+        onLogin(
+          response.data.user
+        );
+      } else {
+        setMessage(
+          response.data?.message ||
+            "Login failed"
+        );
+      }
+    } catch (error) {
+      console.log(
+        "Login error:",
+        error
       );
 
-      onLogin(response.data.user);
-    } catch (error) {
       setMessage(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Login failed"
       );
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="page-background login-bg">
       <div className="glass-card auth-card">
-        <h1>Welcome Back</h1>
+        <h1>
+          Welcome Back
+        </h1>
 
         <p className="subtitle">
           Login to FoodSurplus
@@ -470,15 +1022,21 @@ function Login({
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form
+          onSubmit={handleSubmit}
+        >
           <input
             type="email"
             placeholder="Email"
             value={email}
             onChange={(e) =>
-              setEmail(e.target.value)
+              setEmail(
+                e.target.value
+              )
             }
             required
+            disabled={loading}
+            autoComplete="email"
           />
 
           <input
@@ -486,16 +1044,23 @@ function Login({
             placeholder="Password"
             value={password}
             onChange={(e) =>
-              setPassword(e.target.value)
+              setPassword(
+                e.target.value
+              )
             }
             required
+            disabled={loading}
+            autoComplete="current-password"
           />
 
           <button
             className="primary-btn"
             type="submit"
+            disabled={loading}
           >
-            Login
+            {loading
+              ? "🔄 Logging in..."
+              : "Login"}
           </button>
         </form>
 
@@ -505,6 +1070,7 @@ function Login({
           <button
             className="text-btn"
             onClick={goRegister}
+            disabled={loading}
           >
             Register
           </button>
@@ -513,6 +1079,7 @@ function Login({
         <button
           className="admin-login-btn"
           onClick={goAdminLogin}
+          disabled={loading}
         >
           🔐 Admin Login
         </button>
@@ -529,40 +1096,67 @@ function AdminLogin({
   onLogin,
   goLogin,
 }) {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] =
+    useState("");
+
   const [password, setPassword] =
     useState("");
-  const [message, setMessage] = useState("");
+
+  const [message, setMessage] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (loading) {
+      return;
+    }
+
     setMessage("");
+    setLoading(true);
 
     try {
-      const response = await axios.post(
-        `${API}/auth/login`,
-        {
-          email,
-          password,
-        }
-      );
+      const response =
+        await axios.post(
+          `${API}/auth/login`,
+          {
+            email: email.trim(),
+            password,
+          },
+          {
+            timeout: 15000,
+          }
+        );
 
       if (
-        response.data.user?.role !== "admin"
+        response.data.user?.role !==
+        "admin"
       ) {
         setMessage(
           "Access denied. Admin account required."
         );
-
         return;
       }
 
-      onLogin(response.data.user);
+      onLogin(
+        response.data.user
+      );
     } catch (error) {
+      console.log(
+        "Admin login error:",
+        error
+      );
+
       setMessage(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Admin login failed"
       );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -573,7 +1167,9 @@ function AdminLogin({
           🔐
         </div>
 
-        <h1>Admin Login</h1>
+        <h1>
+          Admin Login
+        </h1>
 
         <p className="subtitle">
           FoodSurplus Administration
@@ -585,15 +1181,20 @@ function AdminLogin({
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form
+          onSubmit={handleSubmit}
+        >
           <input
             type="email"
             placeholder="Admin Email"
             value={email}
             onChange={(e) =>
-              setEmail(e.target.value)
+              setEmail(
+                e.target.value
+              )
             }
             required
+            disabled={loading}
           />
 
           <input
@@ -601,16 +1202,22 @@ function AdminLogin({
             placeholder="Admin Password"
             value={password}
             onChange={(e) =>
-              setPassword(e.target.value)
+              setPassword(
+                e.target.value
+              )
             }
             required
+            disabled={loading}
           />
 
           <button
             className="primary-btn"
             type="submit"
+            disabled={loading}
           >
-            Admin Login
+            {loading
+              ? "🔄 Logging in..."
+              : "Admin Login"}
           </button>
         </form>
 
@@ -620,6 +1227,7 @@ function AdminLogin({
           <button
             className="text-btn"
             onClick={goLogin}
+            disabled={loading}
           >
             User Login
           </button>
@@ -633,52 +1241,77 @@ function AdminLogin({
 // REGISTER
 // ==================================================
 
-function Register({ goLogin }) {
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    address: "",
-    password: "",
-    role: "donor",
-  });
+function Register({
+  goLogin,
+}) {
+  const [form, setForm] =
+    useState({
+      name: "",
+      email: "",
+      phone: "",
+      address: "",
+      password: "",
+      role: "donor",
+    });
 
-  const [message, setMessage] = useState("");
+  const [message, setMessage] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
 
   const handleChange = (e) => {
     setForm({
       ...form,
-      [e.target.name]: e.target.value,
+      [e.target.name]:
+        e.target.value,
     });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (loading) {
+      return;
+    }
+
     setMessage("");
+    setLoading(true);
 
     try {
-      const response = await axios.post(
-        `${API}/auth/register`,
-        form
-      );
+      const response =
+        await axios.post(
+          `${API}/auth/register`,
+          form,
+          {
+            timeout: 15000,
+          }
+        );
 
-      setMessage(response.data.message);
+      setMessage(
+        response.data.message
+      );
 
       setTimeout(() => {
         goLogin();
       }, 1200);
     } catch (error) {
       setMessage(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Registration failed"
       );
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="page-background register-bg">
       <div className="glass-card auth-card">
-        <h1>Create Account</h1>
+        <h1>
+          Create Account
+        </h1>
 
         <p className="subtitle">
           Join FoodSurplus
@@ -690,7 +1323,9 @@ function Register({ goLogin }) {
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form
+          onSubmit={handleSubmit}
+        >
           <input
             type="text"
             name="name"
@@ -698,6 +1333,7 @@ function Register({ goLogin }) {
             value={form.name}
             onChange={handleChange}
             required
+            disabled={loading}
           />
 
           <input
@@ -707,6 +1343,7 @@ function Register({ goLogin }) {
             value={form.email}
             onChange={handleChange}
             required
+            disabled={loading}
           />
 
           <input
@@ -716,6 +1353,7 @@ function Register({ goLogin }) {
             value={form.phone}
             onChange={handleChange}
             required
+            disabled={loading}
           />
 
           <input
@@ -725,6 +1363,7 @@ function Register({ goLogin }) {
             value={form.address}
             onChange={handleChange}
             required
+            disabled={loading}
           />
 
           <input
@@ -734,12 +1373,14 @@ function Register({ goLogin }) {
             value={form.password}
             onChange={handleChange}
             required
+            disabled={loading}
           />
 
           <select
             name="role"
             value={form.role}
             onChange={handleChange}
+            disabled={loading}
           >
             <option value="donor">
               Food Donor
@@ -753,8 +1394,11 @@ function Register({ goLogin }) {
           <button
             className="primary-btn"
             type="submit"
+            disabled={loading}
           >
-            Create Account
+            {loading
+              ? "🔄 Creating..."
+              : "Create Account"}
           </button>
         </form>
 
@@ -764,6 +1408,7 @@ function Register({ goLogin }) {
           <button
             className="text-btn"
             onClick={goLogin}
+            disabled={loading}
           >
             Login
           </button>
@@ -790,11 +1435,15 @@ function Home({
         </div>
 
         <div className="nav-buttons">
-          <button onClick={goLogin}>
+          <button
+            onClick={goLogin}
+          >
             Login
           </button>
 
-          <button onClick={goRegister}>
+          <button
+            onClick={goRegister}
+          >
             Register
           </button>
 
@@ -859,18 +1508,23 @@ function UserDashboard({
   user,
   logout,
 }) {
-  const [food, setFood] = useState({
-    foodName: "",
-    foodType: "Veg",
-    quantity: "",
-    unit: "plates",
-    description: "",
-    location: "",
-    expiryTime: "",
-  });
+  const [food, setFood] =
+    useState({
+      foodName: "",
+      foodType: "Veg",
+      quantity: "",
+      unit: "plates",
+      description: "",
+      location: "",
+      expiryTime: "",
+    });
 
-  const [foods, setFoods] = useState([]);
-  const [claimed, setClaimed] = useState([]);
+  const [foods, setFoods] =
+    useState([]);
+
+  const [claimed, setClaimed] =
+    useState([]);
+
   const [myDonations, setMyDonations] =
     useState([]);
 
@@ -880,80 +1534,132 @@ function UserDashboard({
   const [message, setMessage] =
     useState("");
 
-  // ==================================================
-  // CURRENT LOCATION
-  // ==================================================
+  const [showNotifications,
+    setShowNotifications] =
+    useState(false);
+
+  const [notificationCount,
+    setNotificationCount] =
+    useState(0);
 
   const {
     userCoords,
     locationError,
+    refreshLocation,
   } = useCurrentLocation();
 
   const userId =
     user.id || user._id;
 
   // ==================================================
+  // LOAD NOTIFICATION COUNT
+  // ==================================================
+
+  const loadNotificationCount =
+    useCallback(async () => {
+      if (!userId) {
+        return;
+      }
+
+      try {
+        const response =
+          await axios.get(
+            `${API}/notifications/${userId}`,
+            {
+              timeout: 15000,
+            }
+          );
+
+        setNotificationCount(
+          response.data?.unreadCount || 0
+        );
+      } catch (error) {
+        console.log(
+          "Notification count error:",
+          error
+        );
+      }
+    }, [userId]);
+
+  // ==================================================
   // LOAD AVAILABLE FOOD
   // ==================================================
 
-  const loadFoods = async () => {
-    try {
-      const response = await axios.get(
-        `${API}/food`
-      );
+  const loadFoods = useCallback(
+    async () => {
+      try {
+        const response =
+          await axios.get(
+            `${API}/food`,
+            {
+              timeout: 15000,
+            }
+          );
 
-      setFoods(
-        response.data.foods || []
-      );
-    } catch (error) {
-      console.log(
-        "Load food error:",
-        error
-      );
-    }
-  };
+        setFoods(
+          response.data.foods || []
+        );
+      } catch (error) {
+        console.log(
+          "Load food error:",
+          error
+        );
+      }
+    },
+    []
+  );
 
   // ==================================================
   // LOAD CLAIMED FOOD
   // ==================================================
 
-  const loadClaimed = async () => {
-    try {
-      const response = await axios.get(
-        `${API}/food/receiver/${userId}`
-      );
+  const loadClaimed =
+    useCallback(async () => {
+      try {
+        const response =
+          await axios.get(
+            `${API}/food/receiver/${userId}`,
+            {
+              timeout: 15000,
+            }
+          );
 
-      setClaimed(
-        response.data.foods || []
-      );
-    } catch (error) {
-      console.log(
-        "Load claimed food error:",
-        error
-      );
-    }
-  };
+        setClaimed(
+          response.data.foods || []
+        );
+      } catch (error) {
+        console.log(
+          "Load claimed food error:",
+          error
+        );
+      }
+    }, [userId]);
 
   // ==================================================
   // LOAD MY DONATIONS
   // ==================================================
 
-  const loadMyDonations = async () => {
-    try {
-      const response = await axios.get(
-        `${API}/food/donor/${userId}`
-      );
+  const loadMyDonations =
+    useCallback(async () => {
+      try {
+        const response =
+          await axios.get(
+            `${API}/food/donor/${userId}`,
+            {
+              timeout: 15000,
+            }
+          );
 
-      setMyDonations(
-        response.data.foods || []
-      );
-    } catch (error) {
-      console.log(
-        "Load donations error:",
-        error
-      );
-    }
-  };
+        setMyDonations(
+          response.data.foods || []
+        );
+      } catch (error) {
+        console.log(
+          "Load donations error:",
+          error
+        );
+      }
+    }, [userId]);
 
   // ==================================================
   // INITIAL LOAD
@@ -963,7 +1669,35 @@ function UserDashboard({
     loadFoods();
     loadClaimed();
     loadMyDonations();
-  }, []);
+    loadNotificationCount();
+  }, [
+    loadFoods,
+    loadClaimed,
+    loadMyDonations,
+    loadNotificationCount,
+  ]);
+
+  // ==================================================
+  // AUTO REFRESH
+  // ==================================================
+
+  useEffect(() => {
+    const interval =
+      setInterval(() => {
+        loadFoods();
+        loadClaimed();
+        loadMyDonations();
+        loadNotificationCount();
+      }, 15000);
+
+    return () =>
+      clearInterval(interval);
+  }, [
+    loadFoods,
+    loadClaimed,
+    loadMyDonations,
+    loadNotificationCount,
+  ]);
 
   // ==================================================
   // INPUT CHANGE
@@ -983,6 +1717,7 @@ function UserDashboard({
 
   const addFood = async (e) => {
     e.preventDefault();
+
     setMessage("");
 
     try {
@@ -990,30 +1725,22 @@ function UserDashboard({
         `${API}/food`,
         {
           donorId: userId,
-
           foodName:
             food.foodName,
-
           foodType:
             food.foodType,
-
           quantity:
             Number(food.quantity),
-
-          unit:
-            food.unit,
-
+          unit: food.unit,
           description:
             food.description,
-
-          // ONLY TEXT LOCATION
-          // NO LATITUDE
-          // NO LONGITUDE
           location:
             food.location,
-
           expiryTime:
             food.expiryTime,
+        },
+        {
+          timeout: 15000,
         }
       );
 
@@ -1033,9 +1760,13 @@ function UserDashboard({
 
       await loadFoods();
       await loadMyDonations();
+      await loadNotificationCount();
+
+      setTab("donations");
     } catch (error) {
       setMessage(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Failed to donate food"
       );
     }
@@ -1045,25 +1776,42 @@ function UserDashboard({
   // CLAIM FOOD
   // ==================================================
 
-  const claimFood = async (foodId) => {
+  const claimFood = async (
+    foodId
+  ) => {
     try {
+      setMessage(
+        "🔄 Claiming food..."
+      );
+
       await axios.put(
         `${API}/food/${foodId}/claim`,
         {
           receiverId: userId,
+        },
+        {
+          timeout: 15000,
         }
       );
 
       setMessage(
-        "Food claimed successfully!"
+        "✅ Food claimed successfully! Notification created."
       );
 
       await loadFoods();
       await loadClaimed();
       await loadMyDonations();
+      await loadNotificationCount();
+
+      setTab("claimed");
+
+      setTimeout(() => {
+        setMessage("");
+      }, 4000);
     } catch (error) {
       setMessage(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Failed to claim food"
       );
     }
@@ -1073,7 +1821,9 @@ function UserDashboard({
   // CANCEL FOOD
   // ==================================================
 
-  const cancelFood = async (foodId) => {
+  const cancelFood = async (
+    foodId
+  ) => {
     const confirmCancel =
       window.confirm(
         "Are you sure you want to cancel this food?"
@@ -1088,6 +1838,9 @@ function UserDashboard({
         `${API}/food/${foodId}/cancel`,
         {
           userId,
+        },
+        {
+          timeout: 15000,
         }
       );
 
@@ -1097,9 +1850,11 @@ function UserDashboard({
 
       await loadFoods();
       await loadMyDonations();
+      await loadNotificationCount();
     } catch (error) {
       setMessage(
-        error.response?.data?.message ||
+        error.response?.data
+          ?.message ||
           "Failed to cancel food"
       );
     }
@@ -1116,6 +1871,9 @@ function UserDashboard({
           `${API}/food/${foodId}/distribute`,
           {
             userId,
+          },
+          {
+            timeout: 15000,
           }
         );
 
@@ -1124,9 +1882,12 @@ function UserDashboard({
         );
 
         await loadMyDonations();
+        await loadClaimed();
+        await loadNotificationCount();
       } catch (error) {
         setMessage(
-          error.response?.data?.message ||
+          error.response?.data
+            ?.message ||
             "Failed to distribute food"
         );
       }
@@ -1139,16 +1900,86 @@ function UserDashboard({
           🍽️ FoodSurplus
         </div>
 
-        <div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            flexWrap: "wrap",
+          }}
+        >
           <span className="role-badge">
             USER
           </span>
 
-          <button onClick={logout}>
+          {/* NOTIFICATION BUTTON */}
+
+          <button
+            onClick={() =>
+              setShowNotifications(
+                (previous) =>
+                  !previous
+              )
+            }
+            style={{
+              position: "relative",
+              cursor: "pointer",
+            }}
+          >
+            🔔 Notifications
+
+            {notificationCount >
+              0 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-8px",
+                  right: "-8px",
+                  minWidth: "21px",
+                  height: "21px",
+                  borderRadius:
+                    "50%",
+                  background:
+                    "#ef4444",
+                  color: "white",
+                  fontSize: "11px",
+                  display: "flex",
+                  alignItems:
+                    "center",
+                  justifyContent:
+                    "center",
+                  fontWeight:
+                    "bold",
+                }}
+              >
+                {notificationCount >
+                99
+                  ? "99+"
+                  : notificationCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={logout}
+          >
             Logout
           </button>
         </div>
       </nav>
+
+      {/* NOTIFICATION PANEL */}
+
+      {showNotifications && (
+        <Notifications
+          userId={userId}
+          onClose={() =>
+            setShowNotifications(
+              false
+            )
+          }
+        />
+      )}
 
       <div className="dashboard-content">
         <h1>
@@ -1166,13 +1997,25 @@ function UserDashboard({
           📞 {user.phone}
         </p>
 
-        {/* ==================================================
-            LOCATION STATUS
-        ================================================== */}
+        {/* LOCATION STATUS */}
 
         {locationError && (
           <div className="message">
             📍 {locationError}
+
+            <br />
+
+            <button
+              className="secondary-btn"
+              onClick={
+                refreshLocation
+              }
+              style={{
+                marginTop: "8px",
+              }}
+            >
+              🔄 Retry Location
+            </button>
           </div>
         )}
 
@@ -1180,19 +2023,37 @@ function UserDashboard({
           <div
             style={{
               marginBottom: "15px",
-              padding: "10px",
+              padding: "12px",
               borderRadius: "10px",
               background:
                 "rgba(255,255,255,0.12)",
             }}
           >
-            📍 Your current location
-            is enabled.
+            📍{" "}
+            <strong>
+              Your current location
+              is enabled.
+            </strong>
+
             <br />
-            Free road routing calculates
-            distance and estimated travel
-            time separately for every food
-            location.
+
+            🧭 Current GPS:
+            {" "}
+            {userCoords.lat.toFixed(
+              5
+            )}
+            ,{" "}
+            {userCoords.lon.toFixed(
+              5
+            )}
+
+            <br />
+
+            🚗 Every food card calculates
+            the road distance and
+            estimated travel time
+            separately from your
+            current location.
           </div>
         )}
 
@@ -1202,9 +2063,7 @@ function UserDashboard({
           </div>
         )}
 
-        {/* ==================================================
-            TABS
-        ================================================== */}
+        {/* TABS */}
 
         <div className="tabs">
           <button
@@ -1270,7 +2129,9 @@ function UserDashboard({
               🍱 Donate Surplus Food
             </h2>
 
-            <form onSubmit={addFood}>
+            <form
+              onSubmit={addFood}
+            >
               <input
                 name="foodName"
                 placeholder="Food Name"
@@ -1396,7 +2257,9 @@ function UserDashboard({
           <div className="food-grid">
             {foods.length === 0 ? (
               <div className="glass-card empty-card">
-                <h2>🍽️</h2>
+                <h2>
+                  🍽️
+                </h2>
 
                 <p>
                   No food currently
@@ -1460,15 +2323,24 @@ function UserDashboard({
 
                   {item.description && (
                     <p>
-                      {item.description}
+                      {
+                        item.description
+                      }
                     </p>
                   )}
+
+                  {/* CURRENT LOCATION ROUTE */}
 
                   <ViewLocation
                     location={
                       item.location
                     }
+                    userCoords={
+                      userCoords
+                    }
                   />
+
+                  {/* SEPARATE DISTANCE */}
 
                   <DistanceInfo
                     location={
@@ -1494,6 +2366,7 @@ function UserDashboard({
                       style={{
                         marginTop:
                           "10px",
+                        width: "100%",
                       }}
                     >
                       🤝 Claim Food
@@ -1513,7 +2386,9 @@ function UserDashboard({
           <div className="food-grid">
             {claimed.length === 0 ? (
               <div className="glass-card empty-card">
-                <h2>📦</h2>
+                <h2>
+                  📦
+                </h2>
 
                 <p>
                   No claimed food
@@ -1573,6 +2448,9 @@ function UserDashboard({
                     location={
                       item.location
                     }
+                    userCoords={
+                      userCoords
+                    }
                   />
 
                   <DistanceInfo
@@ -1603,7 +2481,9 @@ function UserDashboard({
             {myDonations.length ===
             0 ? (
               <div className="glass-card empty-card">
-                <h2>📋</h2>
+                <h2>
+                  📋
+                </h2>
 
                 <p>
                   You have not donated
@@ -1752,7 +2632,10 @@ function AdminDashboard({
     try {
       const userResponse =
         await axios.get(
-          `${API}/users`
+          `${API}/users`,
+          {
+            timeout: 15000,
+          }
         );
 
       setUsers(
@@ -1762,7 +2645,10 @@ function AdminDashboard({
 
       const foodResponse =
         await axios.get(
-          `${API}/admin/food`
+          `${API}/admin/food`,
+          {
+            timeout: 15000,
+          }
         );
 
       setFoods(
@@ -1779,6 +2665,15 @@ function AdminDashboard({
 
   useEffect(() => {
     loadData();
+
+    const interval =
+      setInterval(
+        loadData,
+        15000
+      );
+
+    return () =>
+      clearInterval(interval);
   }, []);
 
   return (
@@ -1813,13 +2708,13 @@ function AdminDashboard({
           </strong>
         </p>
 
-        {/* ==================================================
-            STATISTICS
-        ================================================== */}
+        {/* STATISTICS */}
 
         <div className="stats-grid">
           <div className="glass-card stat-card">
-            <span>👥</span>
+            <span>
+              👥
+            </span>
 
             <h2>
               {users.length}
@@ -1831,7 +2726,9 @@ function AdminDashboard({
           </div>
 
           <div className="glass-card stat-card">
-            <span>🍱</span>
+            <span>
+              🍱
+            </span>
 
             <h2>
               {foods.length}
@@ -1843,7 +2740,9 @@ function AdminDashboard({
           </div>
 
           <div className="glass-card stat-card">
-            <span>🥕</span>
+            <span>
+              🥕
+            </span>
 
             <h2>
               {
@@ -1861,7 +2760,9 @@ function AdminDashboard({
           </div>
 
           <div className="glass-card stat-card">
-            <span>🤝</span>
+            <span>
+              🤝
+            </span>
 
             <h2>
               {
@@ -1879,9 +2780,7 @@ function AdminDashboard({
           </div>
         </div>
 
-        {/* ==================================================
-            REGISTERED USERS
-        ================================================== */}
+        {/* REGISTERED USERS */}
 
         <div className="glass-card table-card">
           <h2>
@@ -1892,11 +2791,25 @@ function AdminDashboard({
             <table>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Address</th>
-                  <th>Role</th>
+                  <th>
+                    Name
+                  </th>
+
+                  <th>
+                    Email
+                  </th>
+
+                  <th>
+                    Phone
+                  </th>
+
+                  <th>
+                    Address
+                  </th>
+
+                  <th>
+                    Role
+                  </th>
                 </tr>
               </thead>
 
@@ -1937,9 +2850,7 @@ function AdminDashboard({
           </div>
         </div>
 
-        {/* ==================================================
-            FOOD RECORDS
-        ================================================== */}
+        {/* FOOD RECORDS */}
 
         <div className="glass-card table-card">
           <h2>
@@ -1950,12 +2861,29 @@ function AdminDashboard({
             <table>
               <thead>
                 <tr>
-                  <th>Food</th>
-                  <th>Quantity</th>
-                  <th>Location</th>
-                  <th>Donor</th>
-                  <th>Receiver</th>
-                  <th>Status</th>
+                  <th>
+                    Food
+                  </th>
+
+                  <th>
+                    Quantity
+                  </th>
+
+                  <th>
+                    Location
+                  </th>
+
+                  <th>
+                    Donor
+                  </th>
+
+                  <th>
+                    Receiver
+                  </th>
+
+                  <th>
+                    Status
+                  </th>
                 </tr>
               </thead>
 
@@ -1994,7 +2922,9 @@ function AdminDashboard({
                             ?.name ||
                           "-"
                         }
+
                         <br />
+
                         📞{" "}
                         {
                           food.donorId
@@ -2010,7 +2940,9 @@ function AdminDashboard({
                             ?.name ||
                           "-"
                         }
+
                         <br />
+
                         📞{" "}
                         {
                           food
@@ -2047,6 +2979,9 @@ function App() {
 
   const [user, setUser] =
     useState(null);
+
+  // Backend warm-up
+  useBackendWarmup();
 
   // ==================================================
   // USER LOGIN
@@ -2094,7 +3029,7 @@ function App() {
   };
 
   // ==================================================
-  // LOGIN PAGE
+  // LOGIN
   // ==================================================
 
   if (page === "login") {

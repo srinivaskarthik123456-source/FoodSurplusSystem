@@ -16,7 +16,8 @@ const foodSchema = new mongoose.Schema(
 
         foodType: {
             type: String,
-            required: true
+            required: true,
+            trim: true
         },
 
         quantity: {
@@ -27,7 +28,8 @@ const foodSchema = new mongoose.Schema(
 
         unit: {
             type: String,
-            required: true
+            required: true,
+            trim: true
         },
 
         description: {
@@ -35,13 +37,12 @@ const foodSchema = new mongoose.Schema(
             default: ""
         },
 
-        // Donor's readable location
         location: {
             type: String,
-            required: true
+            required: true,
+            trim: true
         },
 
-        // Donor's exact coordinates
         latitude: {
             type: Number,
             default: null
@@ -59,13 +60,17 @@ const foodSchema = new mongoose.Schema(
 
         status: {
             type: String,
+
             enum: [
                 "available",
                 "claimed",
+                "picked_up",
+                "completed",
                 "cancelled",
                 "expired",
                 "distributed"
             ],
+
             default: "available"
         },
 
@@ -76,6 +81,21 @@ const foodSchema = new mongoose.Schema(
         },
 
         claimedAt: {
+            type: Date,
+            default: null
+        },
+
+        pickedUpAt: {
+            type: Date,
+            default: null
+        },
+
+        completedAt: {
+            type: Date,
+            default: null
+        },
+
+        distributedAt: {
             type: Date,
             default: null
         },

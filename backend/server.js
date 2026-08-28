@@ -8,11 +8,35 @@ require("dotenv").config();
 
 const User = require("./models/User");
 const Food = require("./models/Food");
+const Notification = require("./models/Notification");
+const Rating = require("./models/Rating");
 
 const app = express();
 
-app.use(cors());
+
+// ==================================================
+// BASIC CONFIG
+// ==================================================
+
+app.use(
+    cors({
+        origin: true,
+        credentials: true
+    })
+);
+
 app.use(express.json());
+
+
+// ==================================================
+// CONFIG
+// ==================================================
+
+const PORT = process.env.PORT || 5000;
+
+const JWT_SECRET =
+    process.env.JWT_SECRET ||
+    "food_surplus_secret";
 
 
 // ==================================================
@@ -20,7 +44,11 @@ app.use(express.json());
 // ==================================================
 
 mongoose
-    .connect(process.env.MONGO_URI)
+    .connect(process.env.MONGO_URI, {
+        serverSelectionTimeoutMS: 10000,
+        maxPoolSize: 10,
+        minPoolSize: 2
+    })
     .then(() => {
         console.log("MongoDB connected successfully!");
     })
@@ -33,49 +61,89 @@ mongoose
 
 
 // ==================================================
-// JWT SECRET
-// ==================================================
-
-const JWT_SECRET =
-    process.env.JWT_SECRET ||
-    "food_surplus_secret";
-
-
-// ==================================================
 // HOME
 // ==================================================
 
 app.get("/", (req, res) => {
-
     res.json({
         success: true,
         message:
             "Food Surplus System Backend is running!"
     });
-
 });
 
 
 // ==================================================
-// GEOCODING
-// LOCATION TEXT → LATITUDE/LONGITUDE
+// HELPER - VALID OBJECT ID
 // ==================================================
 
-async function geocodeLocation(location) {
+function isValidObjectId(id) {
+    return mongoose.Types.ObjectId.isValid(id);
+}
 
+
+// ==================================================
+// HELPER - CREATE NOTIFICATION
+// ==================================================
+
+async function createNotification({
+    userId,
+    title,
+    message,
+    type = "system",
+    foodId = null
+}) {
     try {
-
-        if (!location || !location.trim()) {
+        if (!userId) {
             return null;
         }
 
+        const notification =
+            await Notification.create({
+                userId,
+                title,
+                message,
+                type,
+                foodId
+            });
+
+        return notification;
+    } catch (error) {
+        console.log(
+            "Notification error:",
+            error.message
+        );
+
+        return null;
+    }
+}
+
+
+// ==================================================
+// GEOCODING - NOMINATIM
+// ==================================================
+
+async function geocodeLocation(location) {
+    try {
+        if (
+            !location ||
+            !String(location).trim()
+        ) {
+            return null;
+        }
+
+        const cleanLocation =
+            String(location).trim();
+
         const query =
             encodeURIComponent(
-                location.trim()
+                cleanLocation
             );
 
         const url =
-            `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${query}`;
+            "https://nominatim.openstreetmap.org/search" +
+            "?format=jsonv2&limit=1&q=" +
+            query;
 
         const response =
             await fetch(url, {
@@ -86,9 +154,8 @@ async function geocodeLocation(location) {
             });
 
         if (!response.ok) {
-
             console.log(
-                "Geocoding request failed:",
+                "Geocoding failed:",
                 response.status
             );
 
@@ -99,26 +166,17 @@ async function geocodeLocation(location) {
             await response.json();
 
         if (
-            !results ||
+            !Array.isArray(results) ||
             results.length === 0
         ) {
-
-            console.log(
-                "Location not found:",
-                location
-            );
-
             return null;
         }
 
-        const result =
-            results[0];
-
         const latitude =
-            Number(result.lat);
+            Number(results[0].lat);
 
         const longitude =
-            Number(result.lon);
+            Number(results[0].lon);
 
         if (
             !Number.isFinite(latitude) ||
@@ -127,30 +185,14 @@ async function geocodeLocation(location) {
             return null;
         }
 
-        console.log(
-            "GEOCODED LOCATION:",
-            location
-        );
-
-        console.log(
-            "Latitude:",
-            latitude
-        );
-
-        console.log(
-            "Longitude:",
-            longitude
-        );
-
         return {
             latitude,
             longitude,
             displayName:
-                result.display_name || location
+                results[0].display_name ||
+                cleanLocation
         };
-
     } catch (error) {
-
         console.log(
             "Geocoding error:",
             error.message
@@ -162,8 +204,7 @@ async function geocodeLocation(location) {
 
 
 // ==================================================
-// ROUTING
-// TWO COORDINATES → ROAD DISTANCE + TRAVEL TIME
+// ROAD ROUTE - OSRM
 // ==================================================
 
 async function getRoadRoute(
@@ -172,47 +213,48 @@ async function getRoadRoute(
     destinationLatitude,
     destinationLongitude
 ) {
-
     try {
+        const originLat =
+            Number(originLatitude);
 
-        const values = [
-            originLatitude,
-            originLongitude,
-            destinationLatitude,
-            destinationLongitude
-        ];
+        const originLon =
+            Number(originLongitude);
+
+        const destinationLat =
+            Number(destinationLatitude);
+
+        const destinationLon =
+            Number(destinationLongitude);
 
         if (
-            values.some(
-                value =>
-                    !Number.isFinite(
-                        Number(value)
-                    )
-            )
+            !Number.isFinite(originLat) ||
+            !Number.isFinite(originLon) ||
+            !Number.isFinite(destinationLat) ||
+            !Number.isFinite(destinationLon)
         ) {
-
             return null;
         }
 
-        /*
-         * OSRM coordinate format:
-         * longitude,latitude
-         */
-
         const coordinates =
-            `${Number(originLongitude)},${Number(originLatitude)};` +
-            `${Number(destinationLongitude)},${Number(destinationLatitude)}`;
+            String(originLon) +
+            "," +
+            String(originLat) +
+            ";" +
+            String(destinationLon) +
+            "," +
+            String(destinationLat);
 
         const url =
-            `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=false`;
+            "https://router.project-osrm.org/route/v1/driving/" +
+            coordinates +
+            "?overview=false";
 
         const response =
             await fetch(url);
 
         if (!response.ok) {
-
             console.log(
-                "Routing request failed:",
+                "OSRM routing failed:",
                 response.status
             );
 
@@ -224,14 +266,9 @@ async function getRoadRoute(
 
         if (
             data.code !== "Ok" ||
-            !data.routes ||
+            !Array.isArray(data.routes) ||
             data.routes.length === 0
         ) {
-
-            console.log(
-                "No route found"
-            );
-
             return null;
         }
 
@@ -244,6 +281,17 @@ async function getRoadRoute(
         const durationSeconds =
             Number(route.duration);
 
+        if (
+            !Number.isFinite(
+                distanceMeters
+            ) ||
+            !Number.isFinite(
+                durationSeconds
+            )
+        ) {
+            return null;
+        }
+
         const distanceKm =
             distanceMeters / 1000;
 
@@ -252,15 +300,35 @@ async function getRoadRoute(
                 durationSeconds / 60
             );
 
-        return {
+        let travelTime;
 
+        if (durationMinutes < 60) {
+            travelTime =
+                durationMinutes +
+                " mins";
+        } else {
+            const hours =
+                Math.floor(
+                    durationMinutes / 60
+                );
+
+            const minutes =
+                durationMinutes % 60;
+
+            travelTime =
+                hours +
+                " hr " +
+                minutes +
+                " mins";
+        }
+
+        return {
             distanceKm:
                 Number(
                     distanceKm.toFixed(2)
                 ),
 
             distanceMeters:
-
                 Math.round(
                     distanceMeters
                 ),
@@ -269,25 +337,9 @@ async function getRoadRoute(
 
             durationSeconds,
 
-            /*
-             * Human readable format
-             */
-
-            travelTime:
-
-                durationMinutes < 60
-
-                    ? `${durationMinutes} mins`
-
-                    : `${Math.floor(
-                          durationMinutes / 60
-                      )} hr ${
-                          durationMinutes % 60
-                      } mins`
+            travelTime
         };
-
     } catch (error) {
-
         console.log(
             "Routing error:",
             error.message
@@ -299,15 +351,130 @@ async function getRoadRoute(
 
 
 // ==================================================
+// HAVERSINE DISTANCE
+// ==================================================
+
+function calculateStraightDistance(
+    latitude1,
+    longitude1,
+    latitude2,
+    longitude2
+) {
+    const lat1 =
+        Number(latitude1);
+
+    const lon1 =
+        Number(longitude1);
+
+    const lat2 =
+        Number(latitude2);
+
+    const lon2 =
+        Number(longitude2);
+
+    if (
+        !Number.isFinite(lat1) ||
+        !Number.isFinite(lon1) ||
+        !Number.isFinite(lat2) ||
+        !Number.isFinite(lon2)
+    ) {
+        return null;
+    }
+
+    const earthRadiusKm = 6371;
+
+    const dLat =
+        ((lat2 - lat1) *
+            Math.PI) /
+        180;
+
+    const dLon =
+        ((lon2 - lon1) *
+            Math.PI) /
+        180;
+
+    const a =
+        Math.sin(dLat / 2) *
+            Math.sin(dLat / 2) +
+        Math.cos(
+            (lat1 * Math.PI) / 180
+        ) *
+            Math.cos(
+                (lat2 * Math.PI) / 180
+            ) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+
+    const c =
+        2 *
+        Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+        );
+
+    return Number(
+        (
+            earthRadiusKm * c
+        ).toFixed(2)
+    );
+}
+
+
+// ==================================================
+// FORMAT FOOD
+// ==================================================
+
+function formatFood(food) {
+    if (!food) {
+        return null;
+    }
+
+    return {
+        ...food,
+
+        donorPhone:
+            food.donorId?.phone || "",
+
+        donorAddress:
+            food.donorId?.address || "",
+
+        donorName:
+            food.donorId?.name || "",
+
+        donorEmail:
+            food.donorId?.email || "",
+
+        receiverPhone:
+            food.claimedBy?.phone || "",
+
+        receiverAddress:
+            food.claimedBy?.address || "",
+
+        receiverName:
+            food.claimedBy?.name || "",
+
+        receiverEmail:
+            food.claimedBy?.email || "",
+
+        mapsUrl:
+            food.location
+                ? "https://www.google.com/maps/search/?api=1&query=" +
+                  encodeURIComponent(
+                      food.location
+                  )
+                : ""
+    };
+}
+
+
+// ==================================================
 // REGISTER
 // ==================================================
 
 app.post(
     "/api/auth/register",
     async (req, res) => {
-
         try {
-
             const {
                 name,
                 email,
@@ -324,42 +491,37 @@ app.post(
                 !address ||
                 !password
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Name, email, phone, address and password are required"
                 });
             }
 
-            if (password.length < 6) {
-
+            if (
+                password.length < 6
+            ) {
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Password must contain at least 6 characters"
                 });
             }
 
             const normalizedEmail =
-                email.toLowerCase().trim();
+                email
+                    .toLowerCase()
+                    .trim();
 
             const existingUser =
                 await User.findOne({
                     email:
                         normalizedEmail
-                });
+                }).lean();
 
             if (existingUser) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "User already exists"
                 });
@@ -372,6 +534,7 @@ app.post(
                 );
 
             const allowedRoles = [
+                "user",
                 "donor",
                 "receiver",
                 "admin"
@@ -380,11 +543,10 @@ app.post(
             const userRole =
                 allowedRoles.includes(role)
                     ? role
-                    : "donor";
+                    : "user";
 
             const user =
                 await User.create({
-
                     name:
                         name.trim(),
 
@@ -404,15 +566,13 @@ app.post(
                         userRole
                 });
 
-            res.status(201).json({
-
+            return res.status(201).json({
                 success: true,
 
                 message:
                     "Registration successful",
 
                 user: {
-
                     id:
                         user._id.toString(),
 
@@ -435,18 +595,14 @@ app.post(
                         user.role
                 }
             });
-
         } catch (error) {
-
             console.log(
                 "Register error:",
                 error.message
             );
 
-            res.status(500).json({
-
+            return res.status(500).json({
                 success: false,
-
                 message:
                     "Server error"
             });
@@ -462,40 +618,38 @@ app.post(
 app.post(
     "/api/auth/login",
     async (req, res) => {
-
         try {
-
             const {
                 email,
                 password
             } = req.body;
 
             if (!email || !password) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Email and password are required"
                 });
             }
 
             const normalizedEmail =
-                email.toLowerCase().trim();
+                email
+                    .toLowerCase()
+                    .trim();
 
             const user =
                 await User.findOne({
                     email:
                         normalizedEmail
-                });
+                })
+                    .select(
+                        "_id name email phone address password role"
+                    )
+                    .lean();
 
             if (!user) {
-
                 return res.status(401).json({
-
                     success: false,
-
                     message:
                         "Invalid email or password"
                 });
@@ -508,11 +662,8 @@ app.post(
                 );
 
             if (!passwordMatch) {
-
                 return res.status(401).json({
-
                     success: false,
-
                     message:
                         "Invalid email or password"
                 });
@@ -536,8 +687,7 @@ app.post(
                     }
                 );
 
-            res.json({
-
+            return res.json({
                 success: true,
 
                 message:
@@ -546,7 +696,6 @@ app.post(
                 token,
 
                 user: {
-
                     id:
                         user._id.toString(),
 
@@ -569,18 +718,14 @@ app.post(
                         user.role
                 }
             });
-
         } catch (error) {
-
             console.log(
                 "Login error:",
                 error.message
             );
 
-            res.status(500).json({
-
+            return res.status(500).json({
                 success: false,
-
                 message:
                     "Server error"
             });
@@ -596,38 +741,30 @@ app.post(
 app.get(
     "/api/users",
     async (req, res) => {
-
         try {
-
             const users =
                 await User
                     .find()
                     .select("-password")
                     .sort({
                         createdAt: -1
-                    });
+                    })
+                    .lean();
 
-            res.json({
-
+            return res.json({
                 success: true,
-
                 count:
                     users.length,
-
                 users
             });
-
         } catch (error) {
-
             console.log(
                 "Get users error:",
                 error.message
             );
 
-            res.status(500).json({
-
+            return res.status(500).json({
                 success: false,
-
                 message:
                     "Failed to fetch users"
             });
@@ -643,19 +780,14 @@ app.get(
 app.get(
     "/api/users/:id",
     async (req, res) => {
-
         try {
-
             if (
-                !mongoose.Types.ObjectId.isValid(
+                !isValidObjectId(
                     req.params.id
                 )
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Invalid user ID"
                 });
@@ -666,37 +798,29 @@ app.get(
                     .findById(
                         req.params.id
                     )
-                    .select("-password");
+                    .select("-password")
+                    .lean();
 
             if (!user) {
-
                 return res.status(404).json({
-
                     success: false,
-
                     message:
                         "User not found"
                 });
             }
 
-            res.json({
-
+            return res.json({
                 success: true,
-
                 user
             });
-
         } catch (error) {
-
             console.log(
                 "Get user error:",
                 error.message
             );
 
-            res.status(500).json({
-
+            return res.status(500).json({
                 success: false,
-
                 message:
                     "Failed to fetch user"
             });
@@ -712,8 +836,18 @@ app.get(
 app.put(
     "/api/users/:id",
     async (req, res) => {
-
         try {
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid user ID"
+                });
+            }
 
             const {
                 name,
@@ -726,38 +860,39 @@ app.put(
 
             const updateData = {};
 
-            if (name)
+            if (name !== undefined) {
                 updateData.name =
-                    name.trim();
+                    String(name).trim();
+            }
 
-            if (email)
+            if (email !== undefined) {
                 updateData.email =
-                    email
+                    String(email)
                         .toLowerCase()
                         .trim();
+            }
 
-            if (phone)
+            if (phone !== undefined) {
                 updateData.phone =
-                    phone.trim();
+                    String(phone).trim();
+            }
 
-            if (address)
+            if (address !== undefined) {
                 updateData.address =
-                    address.trim();
+                    String(address).trim();
+            }
 
-            if (role)
+            if (role !== undefined) {
                 updateData.role =
                     role;
+            }
 
             if (password) {
-
                 if (
                     password.length < 6
                 ) {
-
                     return res.status(400).json({
-
                         success: false,
-
                         message:
                             "Password must contain at least 6 characters"
                     });
@@ -779,40 +914,31 @@ app.put(
                         runValidators: true
                     }
                 )
-                .select("-password");
+                    .select("-password")
+                    .lean();
 
             if (!user) {
-
                 return res.status(404).json({
-
                     success: false,
-
                     message:
                         "User not found"
                 });
             }
 
-            res.json({
-
+            return res.json({
                 success: true,
-
                 message:
                     "User updated successfully",
-
                 user
             });
-
         } catch (error) {
-
             console.log(
                 "Update user error:",
                 error.message
             );
 
-            res.status(500).json({
-
+            return res.status(500).json({
                 success: false,
-
                 message:
                     "Failed to update user"
             });
@@ -828,8 +954,18 @@ app.put(
 app.delete(
     "/api/users/:id",
     async (req, res) => {
-
         try {
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid user ID"
+                });
+            }
 
             const user =
                 await User.findByIdAndDelete(
@@ -837,35 +973,26 @@ app.delete(
                 );
 
             if (!user) {
-
                 return res.status(404).json({
-
                     success: false,
-
                     message:
                         "User not found"
                 });
             }
 
-            res.json({
-
+            return res.json({
                 success: true,
-
                 message:
                     "User deleted successfully"
             });
-
         } catch (error) {
-
             console.log(
                 "Delete user error:",
                 error.message
             );
 
-            res.status(500).json({
-
+            return res.status(500).json({
                 success: false,
-
                 message:
                     "Failed to delete user"
             });
@@ -881,9 +1008,7 @@ app.delete(
 app.post(
     "/api/food",
     async (req, res) => {
-
         try {
-
             const {
                 donorId,
                 foodName,
@@ -897,31 +1022,6 @@ app.post(
                 expiryTime
             } = req.body;
 
-
-            console.log("");
-            console.log(
-                "================================"
-            );
-            console.log(
-                "ADD FOOD REQUEST"
-            );
-            console.log(
-                "Donor ID:",
-                donorId
-            );
-            console.log(
-                "Food Name:",
-                foodName
-            );
-            console.log(
-                "Location:",
-                location
-            );
-            console.log(
-                "================================"
-            );
-
-
             if (
                 !donorId ||
                 !foodName ||
@@ -931,61 +1031,37 @@ app.post(
                 !location ||
                 !expiryTime
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Please provide all required food details"
                 });
             }
 
-
-            // ==================================================
-            // CHECK DONOR ID
-            // ==================================================
-
             if (
-                !mongoose.Types.ObjectId.isValid(
+                !isValidObjectId(
                     donorId
                 )
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Invalid donor ID"
                 });
             }
 
-
-            // ==================================================
-            // FIND DONOR
-            // ==================================================
-
             const donor =
                 await User.findById(
                     donorId
-                );
+                ).lean();
 
             if (!donor) {
-
                 return res.status(404).json({
-
                     success: false,
-
                     message:
-                        "Donor user not found in database"
+                        "Donor user not found"
                 });
             }
-
-
-            // ==================================================
-            // LOCATION → COORDINATES
-            // ==================================================
 
             let finalLatitude =
                 latitude !== undefined &&
@@ -999,12 +1075,6 @@ app.post(
                     ? Number(longitude)
                     : null;
 
-
-            // ==================================================
-            // IF COORDINATES NOT PROVIDED
-            // GEOCODE LOCATION
-            // ==================================================
-
             if (
                 !Number.isFinite(
                     finalLatitude
@@ -1013,68 +1083,67 @@ app.post(
                     finalLongitude
                 )
             ) {
-
-                console.log(
-                    "Coordinates not provided."
-                );
-
-                console.log(
-                    "Geocoding location..."
-                );
-
                 const geocoded =
                     await geocodeLocation(
                         location
                     );
 
-                if (geocoded) {
-
-                    finalLatitude =
-                        geocoded.latitude;
-
-                    finalLongitude =
-                        geocoded.longitude;
-
-                    console.log(
-                        "Coordinates obtained automatically."
-                    );
-
-                } else {
-
-                    console.log(
-                        "Unable to geocode location."
-                    );
-
+                if (!geocoded) {
                     return res.status(400).json({
-
                         success: false,
-
                         message:
                             "Could not find this location. Please enter a more specific location."
                     });
                 }
+
+                finalLatitude =
+                    geocoded.latitude;
+
+                finalLongitude =
+                    geocoded.longitude;
             }
 
+            const finalExpiry =
+                new Date(expiryTime);
 
-            // ==================================================
-            // CREATE FOOD
-            // ==================================================
+            if (
+                Number.isNaN(
+                    finalExpiry.getTime()
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid expiry time"
+                });
+            }
+
+            if (
+                finalExpiry <= new Date()
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Expiry time must be in the future"
+                });
+            }
 
             const food =
                 await Food.create({
-
                     donorId:
                         donor._id,
 
                     foodName:
                         foodName.trim(),
 
-                    foodType,
+                    foodType:
+                        foodType.trim(),
 
                     quantity:
                         Number(quantity),
 
-                    unit,
+                    unit:
+                        unit.trim(),
 
                     description:
                         description || "",
@@ -1089,33 +1158,13 @@ app.post(
                         finalLongitude,
 
                     expiryTime:
-                        new Date(
-                            expiryTime
-                        ),
+                        finalExpiry,
 
                     status:
                         "available"
                 });
 
-
-            console.log(
-                "FOOD CREATED:",
-                food._id.toString()
-            );
-
-            console.log(
-                "Saved Latitude:",
-                finalLatitude
-            );
-
-            console.log(
-                "Saved Longitude:",
-                finalLongitude
-            );
-
-
-            res.status(201).json({
-
+            return res.status(201).json({
                 success: true,
 
                 message:
@@ -1123,19 +1172,14 @@ app.post(
 
                 food
             });
-
-
         } catch (error) {
-
             console.log(
-                "ADD FOOD ERROR:",
-                error
+                "Add food error:",
+                error.message
             );
 
-            res.status(500).json({
-
+            return res.status(500).json({
                 success: false,
-
                 message:
                     error.message ||
                     "Failed to add surplus food"
@@ -1147,13 +1191,234 @@ app.post(
 
 // ==================================================
 // GET AVAILABLE FOOD
+// SEARCH + FILTER + NEARBY
 // ==================================================
 
 app.get(
     "/api/food",
     async (req, res) => {
-
         try {
+            const {
+                search,
+                foodType,
+                latitude,
+                longitude,
+                maxDistance,
+                sort
+            } = req.query;
+
+            const now =
+                new Date();
+
+            await Food.updateMany(
+                {
+                    status:
+                        "available",
+
+                    expiryTime: {
+                        $lt: now
+                    }
+                },
+                {
+                    $set: {
+                        status:
+                            "expired"
+                    }
+                }
+            );
+
+            const filter = {
+                status:
+                    "available"
+            };
+
+            if (
+                search &&
+                search.trim()
+            ) {
+                filter.foodName = {
+                    $regex:
+                        search.trim(),
+                    $options:
+                        "i"
+                };
+            }
+
+            if (
+                foodType &&
+                foodType.trim() &&
+                foodType.toLowerCase() !==
+                    "all"
+            ) {
+                filter.foodType = {
+                    $regex:
+                        foodType.trim(),
+                    $options:
+                        "i"
+                };
+            }
+
+            let foods =
+                await Food
+                    .find(filter)
+                    .populate(
+                        "donorId",
+                        "name email phone address"
+                    )
+                    .populate(
+                        "claimedBy",
+                        "name email phone address"
+                    )
+                    .sort({
+                        createdAt: -1
+                    })
+                    .lean();
+
+            if (
+                latitude !== undefined &&
+                longitude !== undefined &&
+                Number.isFinite(
+                    Number(latitude)
+                ) &&
+                Number.isFinite(
+                    Number(longitude)
+                )
+            ) {
+                foods =
+                    foods.map((food) => {
+                        const distance =
+                            calculateStraightDistance(
+                                latitude,
+                                longitude,
+                                food.latitude,
+                                food.longitude
+                            );
+
+                        return {
+                            ...food,
+                            distanceKm:
+                                distance
+                        };
+                    });
+
+                if (
+                    maxDistance !==
+                        undefined &&
+                    Number.isFinite(
+                        Number(maxDistance)
+                    )
+                ) {
+                    const maximum =
+                        Number(
+                            maxDistance
+                        );
+
+                    foods =
+                        foods.filter(
+                            (food) =>
+                                food.distanceKm !==
+                                    null &&
+                                food.distanceKm <=
+                                    maximum
+                        );
+                }
+
+                if (
+                    sort ===
+                    "nearest"
+                ) {
+                    foods.sort(
+                        (a, b) =>
+                            (a.distanceKm ??
+                                Infinity) -
+                            (b.distanceKm ??
+                                Infinity)
+                    );
+                }
+            }
+
+            const formattedFoods =
+                foods.map(
+                    (food) =>
+                        formatFood(food)
+                );
+
+            return res.json({
+                success: true,
+
+                count:
+                    formattedFoods.length,
+
+                foods:
+                    formattedFoods
+            });
+        } catch (error) {
+            console.log(
+                "Get food error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to fetch available food"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// NEARBY FOOD
+// ==================================================
+
+app.get(
+    "/api/food/nearby",
+    async (req, res) => {
+        try {
+            const {
+                latitude,
+                longitude,
+                maxDistance = 10
+            } = req.query;
+
+            if (
+                latitude === undefined ||
+                longitude === undefined
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Latitude and longitude are required"
+                });
+            }
+
+            const userLatitude =
+                Number(latitude);
+
+            const userLongitude =
+                Number(longitude);
+
+            const maximumDistance =
+                Number(maxDistance);
+
+            if (
+                !Number.isFinite(
+                    userLatitude
+                ) ||
+                !Number.isFinite(
+                    userLongitude
+                ) ||
+                !Number.isFinite(
+                    maximumDistance
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid coordinates or distance"
+                });
+            }
 
             await Food.updateMany(
                 {
@@ -1165,7 +1430,6 @@ app.get(
                             new Date()
                     }
                 },
-
                 {
                     $set: {
                         status:
@@ -1173,7 +1437,6 @@ app.get(
                     }
                 }
             );
-
 
             const foods =
                 await Food
@@ -1185,79 +1448,64 @@ app.get(
                         "donorId",
                         "name email phone address"
                     )
-                    .sort({
-                        createdAt:
-                            -1
-                    });
+                    .lean();
 
-
-            const formattedFoods =
-                foods.map(
-                    food => {
-
-                        const data =
-                            food.toObject();
+            const nearbyFoods =
+                foods
+                    .map((food) => {
+                        const distance =
+                            calculateStraightDistance(
+                                userLatitude,
+                                userLongitude,
+                                food.latitude,
+                                food.longitude
+                            );
 
                         return {
-
-                            ...data,
-
-                            donorPhone:
-                                food.donorId?.phone ||
-                                "",
-
-                            donorAddress:
-                                food.donorId?.address ||
-                                "",
-
-                            donorName:
-                                food.donorId?.name ||
-                                "",
-
-                            donorEmail:
-                                food.donorId?.email ||
-                                "",
-
-                            mapsUrl:
-                                food.location
-                                    ? "https://www.google.com/maps/search/?api=1&query=" +
-                                      encodeURIComponent(
-                                          food.location
-                                      )
-                                    : ""
+                            ...food,
+                            distanceKm:
+                                distance
                         };
+                    })
+                    .filter(
+                        (food) =>
+                            food.distanceKm !==
+                                null &&
+                            food.distanceKm <=
+                                maximumDistance
+                    )
+                    .sort(
+                        (a, b) =>
+                            a.distanceKm -
+                            b.distanceKm
+                    )
+                    .map(
+                        (food) =>
+                            formatFood(food)
+                    );
 
-                    }
-                );
-
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 count:
-                    formattedFoods.length,
+                    nearbyFoods.length,
+
+                maxDistance:
+                    maximumDistance,
 
                 foods:
-                    formattedFoods
+                    nearbyFoods
             });
-
-
         } catch (error) {
-
             console.log(
-                "Get food error:",
+                "Nearby food error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
-                    "Failed to fetch available food"
+                    "Failed to fetch nearby food"
             });
         }
     }
@@ -1265,29 +1513,13 @@ app.get(
 
 
 // ==================================================
-// ROUTE / DISTANCE API
-//
-// FRONTEND SENDS:
-//
-// {
-//   originLatitude,
-//   originLongitude,
-//   destinationLatitude,
-//   destinationLongitude
-// }
-//
-// RETURNS:
-//
-// distanceKm
-// travelTime
+// ROUTE API
 // ==================================================
 
 app.get(
     "/api/route",
     async (req, res) => {
-
         try {
-
             const {
                 originLatitude,
                 originLongitude,
@@ -1295,78 +1527,55 @@ app.get(
                 destinationLongitude
             } = req.query;
 
-
             if (
                 originLatitude === undefined ||
                 originLongitude === undefined ||
                 destinationLatitude === undefined ||
                 destinationLongitude === undefined
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Origin and destination coordinates are required"
                 });
             }
 
-
             const route =
                 await getRoadRoute(
-
                     Number(
                         originLatitude
                     ),
-
                     Number(
                         originLongitude
                     ),
-
                     Number(
                         destinationLatitude
                     ),
-
                     Number(
                         destinationLongitude
                     )
                 );
 
-
             if (!route) {
-
                 return res.status(404).json({
-
                     success: false,
-
                     message:
                         "Unable to calculate road route"
                 });
             }
 
-
-            res.json({
-
-                success:
-                    true,
-
+            return res.json({
+                success: true,
                 route
             });
-
-
         } catch (error) {
-
             console.log(
                 "Route API error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to calculate route"
             });
@@ -1376,76 +1585,53 @@ app.get(
 
 
 // ==================================================
-// GET FOOD + ROUTE
-//
-// USER LOCATION → FOOD LOCATION
-//
-// Query:
-//
-// ?latitude=
-// &longitude=
+// FOOD ROUTE
 // ==================================================
 
 app.get(
     "/api/food/:id/route",
     async (req, res) => {
-
         try {
-
             const {
                 latitude,
                 longitude
             } = req.query;
 
-
             if (
                 latitude === undefined ||
                 longitude === undefined
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Your current latitude and longitude are required"
                 });
             }
 
-
             if (
-                !mongoose.Types.ObjectId.isValid(
+                !isValidObjectId(
                     req.params.id
                 )
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Invalid food ID"
                 });
             }
 
-
             const food =
                 await Food.findById(
                     req.params.id
-                );
-
+                ).lean();
 
             if (!food) {
-
                 return res.status(404).json({
-
                     success: false,
-
                     message:
                         "Food not found"
                 });
             }
-
 
             if (
                 !Number.isFinite(
@@ -1455,100 +1641,61 @@ app.get(
                     Number(food.longitude)
                 )
             ) {
-
                 return res.status(400).json({
-
                     success: false,
-
                     message:
                         "Food location coordinates are not available"
                 });
             }
 
-
             const route =
                 await getRoadRoute(
-
-                    Number(
-                        latitude
-                    ),
-
-                    Number(
-                        longitude
-                    ),
-
-                    Number(
-                        food.latitude
-                    ),
-
-                    Number(
-                        food.longitude
-                    )
+                    Number(latitude),
+                    Number(longitude),
+                    Number(food.latitude),
+                    Number(food.longitude)
                 );
 
-
             if (!route) {
-
                 return res.status(404).json({
-
                     success: false,
-
                     message:
                         "Unable to calculate route"
                 });
             }
 
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 foodId:
                     food._id,
 
                 origin: {
-
                     latitude:
-                        Number(
-                            latitude
-                        ),
+                        Number(latitude),
 
                     longitude:
-                        Number(
-                            longitude
-                        )
+                        Number(longitude)
                 },
 
                 destination: {
-
                     latitude:
-                        Number(
-                            food.latitude
-                        ),
+                        Number(food.latitude),
 
                     longitude:
-                        Number(
-                            food.longitude
-                        )
+                        Number(food.longitude)
                 },
 
                 route
             });
-
-
         } catch (error) {
-
             console.log(
                 "Food route error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to calculate food route"
             });
@@ -1558,56 +1705,126 @@ app.get(
 
 
 // ==================================================
-// GET ALL FOOD - ADMIN
+// GET FOOD BY DONOR
+// IMPORTANT: BEFORE /api/food/:id
 // ==================================================
 
 app.get(
-    "/api/admin/food",
+    "/api/food/donor/:donorId",
     async (req, res) => {
-
         try {
+            if (
+                !isValidObjectId(
+                    req.params.donorId
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid donor ID"
+                });
+            }
 
             const foods =
                 await Food
-                    .find()
-                    .populate(
-                        "donorId",
-                        "name email phone address"
-                    )
+                    .find({
+                        donorId:
+                            req.params.donorId
+                    })
                     .populate(
                         "claimedBy",
                         "name email phone address"
                     )
                     .sort({
-                        createdAt:
-                            -1
-                    });
+                        createdAt: -1
+                    })
+                    .lean();
 
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 count:
                     foods.length,
 
-                foods
+                foods:
+                    foods.map(
+                        (food) =>
+                            formatFood(food)
+                    )
             });
-
         } catch (error) {
-
             console.log(
-                "Admin food error:",
+                "Get donor food error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
-                    "Failed to fetch all food"
+                    "Failed to fetch donor food"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// GET FOOD BY RECEIVER
+// ==================================================
+
+app.get(
+    "/api/food/receiver/:receiverId",
+    async (req, res) => {
+        try {
+            if (
+                !isValidObjectId(
+                    req.params.receiverId
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid receiver ID"
+                });
+            }
+
+            const foods =
+                await Food
+                    .find({
+                        claimedBy:
+                            req.params.receiverId
+                    })
+                    .populate(
+                        "donorId",
+                        "name email phone address"
+                    )
+                    .sort({
+                        claimedAt: -1
+                    })
+                    .lean();
+
+            return res.json({
+                success: true,
+
+                count:
+                    foods.length,
+
+                foods:
+                    foods.map(
+                        (food) =>
+                            formatFood(food)
+                    )
+            });
+        } catch (error) {
+            console.log(
+                "Get receiver food error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to fetch claimed food"
             });
         }
     }
@@ -1621,25 +1838,18 @@ app.get(
 app.get(
     "/api/food/:id",
     async (req, res) => {
-
         try {
-
             if (
-                !mongoose.Types.ObjectId.isValid(
+                !isValidObjectId(
                     req.params.id
                 )
             ) {
-
                 return res.status(400).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Invalid food ID"
                 });
             }
-
 
             const food =
                 await Food
@@ -1653,242 +1863,33 @@ app.get(
                     .populate(
                         "claimedBy",
                         "name email phone address"
-                    );
-
+                    )
+                    .lean();
 
             if (!food) {
-
                 return res.status(404).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Food not found"
                 });
             }
 
-
-            const foodData = {
-
-                ...food.toObject(),
-
-                donorPhone:
-                    food.donorId?.phone ||
-                    "",
-
-                donorName:
-                    food.donorId?.name ||
-                    "",
-
-                donorEmail:
-                    food.donorId?.email ||
-                    "",
-
-                donorAddress:
-                    food.donorId?.address ||
-                    "",
-
-                receiverPhone:
-                    food.claimedBy?.phone ||
-                    "",
-
-                receiverName:
-                    food.claimedBy?.name ||
-                    "",
-
-                receiverEmail:
-                    food.claimedBy?.email ||
-                    "",
-
-                receiverAddress:
-                    food.claimedBy?.address ||
-                    "",
-
-                mapsUrl:
-                    food.location
-                        ? "https://www.google.com/maps/search/?api=1&query=" +
-                          encodeURIComponent(
-                              food.location
-                          )
-                        : ""
-            };
-
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 food:
-                    foodData
+                    formatFood(food)
             });
-
-
         } catch (error) {
-
             console.log(
                 "Get food by ID error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to fetch food"
-            });
-        }
-    }
-);
-
-
-// ==================================================
-// GET FOOD BY DONOR
-// ==================================================
-
-app.get(
-    "/api/food/donor/:donorId",
-    async (req, res) => {
-
-        try {
-
-            if (
-                !mongoose.Types.ObjectId.isValid(
-                    req.params.donorId
-                )
-            ) {
-
-                return res.status(400).json({
-
-                    success:
-                        false,
-
-                    message:
-                        "Invalid donor ID"
-                });
-            }
-
-
-            const foods =
-                await Food
-                    .find({
-                        donorId:
-                            req.params.donorId
-                    })
-                    .populate(
-                        "claimedBy",
-                        "name email phone address"
-                    )
-                    .sort({
-                        createdAt:
-                            -1
-                    });
-
-
-            res.json({
-
-                success:
-                    true,
-
-                count:
-                    foods.length,
-
-                foods
-            });
-
-
-        } catch (error) {
-
-            console.log(
-                "Get donor food error:",
-                error.message
-            );
-
-            res.status(500).json({
-
-                success:
-                    false,
-
-                message:
-                    "Failed to fetch donor food"
-            });
-        }
-    }
-);
-
-
-// ==================================================
-// GET CLAIMED FOOD BY RECEIVER
-// ==================================================
-
-app.get(
-    "/api/food/receiver/:receiverId",
-    async (req, res) => {
-
-        try {
-
-            if (
-                !mongoose.Types.ObjectId.isValid(
-                    req.params.receiverId
-                )
-            ) {
-
-                return res.status(400).json({
-
-                    success:
-                        false,
-
-                    message:
-                        "Invalid receiver ID"
-                });
-            }
-
-
-            const foods =
-                await Food
-                    .find({
-                        claimedBy:
-                            req.params.receiverId
-                    })
-                    .populate(
-                        "donorId",
-                        "name email phone address"
-                    )
-                    .sort({
-                        claimedAt:
-                            -1
-                    });
-
-
-            res.json({
-
-                success:
-                    true,
-
-                count:
-                    foods.length,
-
-                foods
-            });
-
-
-        } catch (error) {
-
-            console.log(
-                "Get receiver food error:",
-                error.message
-            );
-
-            res.status(500).json({
-
-                success:
-                    false,
-
-                message:
-                    "Failed to fetch claimed food"
             });
         }
     }
@@ -1902,66 +1903,58 @@ app.get(
 app.put(
     "/api/food/:id/claim",
     async (req, res) => {
-
         try {
-
             const {
                 receiverId
             } = req.body;
 
-
             if (!receiverId) {
-
                 return res.status(400).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "User ID is required"
                 });
             }
 
-
             if (
-                !mongoose.Types.ObjectId.isValid(
+                !isValidObjectId(
                     receiverId
                 )
             ) {
-
                 return res.status(400).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Invalid receiver ID"
                 });
             }
 
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
 
             const receiver =
                 await User.findById(
                     receiverId
-                );
-
+                ).lean();
 
             if (!receiver) {
-
                 return res.status(404).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Valid user not found"
                 });
             }
 
-
             const food =
                 await Food.findOne({
-
                     _id:
                         req.params.id,
 
@@ -1969,58 +1962,41 @@ app.put(
                         "available"
                 });
 
-
             if (!food) {
-
                 return res.status(404).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Food is not available or already claimed"
                 });
             }
-
 
             if (
                 new Date(
                     food.expiryTime
                 ) < new Date()
             ) {
-
                 food.status =
                     "expired";
 
                 await food.save();
 
-
                 return res.status(400).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "This food has expired"
                 });
             }
 
-
             if (
                 food.donorId.toString() ===
                 receiverId.toString()
             ) {
-
                 return res.status(400).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "You cannot claim your own donated food"
                 });
             }
-
 
             food.claimedBy =
                 receiverId;
@@ -2031,9 +2007,41 @@ app.put(
             food.status =
                 "claimed";
 
-
             await food.save();
 
+            await createNotification({
+                userId:
+                    food.donorId,
+
+                title:
+                    "New Food Claim",
+
+                message:
+                    `${food.foodName} has been claimed by ${receiver.name}.`,
+
+                type:
+                    "claim",
+
+                foodId:
+                    food._id
+            });
+
+            await createNotification({
+                userId:
+                    receiverId,
+
+                title:
+                    "Food Claim Successful",
+
+                message:
+                    `Your claim for ${food.foodName} was successful.`,
+
+                type:
+                    "claim",
+
+                foodId:
+                    food._id
+            });
 
             const updatedFood =
                 await Food
@@ -2047,36 +2055,354 @@ app.put(
                     .populate(
                         "claimedBy",
                         "name email phone address"
-                    );
+                    )
+                    .lean();
 
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 message:
                     "Food claimed successfully",
 
                 food:
-                    updatedFood
+                    formatFood(
+                        updatedFood
+                    )
             });
-
-
         } catch (error) {
-
             console.log(
                 "Claim food error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to claim food"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// PICK UP FOOD
+// ==================================================
+
+app.put(
+    "/api/food/:id/pickup",
+    async (req, res) => {
+        try {
+            const {
+                userId
+            } = req.body;
+
+            if (
+                !userId ||
+                !isValidObjectId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Valid user ID is required"
+                });
+            }
+
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
+
+            const food =
+                await Food.findById(
+                    req.params.id
+                );
+
+            if (!food) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Food not found"
+                });
+            }
+
+            if (
+                !food.claimedBy ||
+                food.claimedBy.toString() !==
+                    userId.toString()
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "Only the receiver who claimed this food can mark it as picked up"
+                });
+            }
+
+            if (
+                food.status !==
+                "claimed"
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Only claimed food can be picked up"
+                });
+            }
+
+            food.status =
+                "picked_up";
+
+            food.pickedUpAt =
+                new Date();
+
+            await food.save();
+
+            await createNotification({
+                userId:
+                    food.donorId,
+
+                title:
+                    "Food Picked Up",
+
+                message:
+                    `${food.foodName} has been picked up successfully.`,
+
+                type:
+                    "pickup",
+
+                foodId:
+                    food._id
+            });
+
+            await createNotification({
+                userId:
+                    food.claimedBy,
+
+                title:
+                    "Food Pickup Confirmed",
+
+                message:
+                    `You picked up ${food.foodName} successfully.`,
+
+                type:
+                    "pickup",
+
+                foodId:
+                    food._id
+            });
+
+            const updatedFood =
+                await Food
+                    .findById(
+                        food._id
+                    )
+                    .populate(
+                        "donorId",
+                        "name email phone address"
+                    )
+                    .populate(
+                        "claimedBy",
+                        "name email phone address"
+                    )
+                    .lean();
+
+            return res.json({
+                success: true,
+
+                message:
+                    "Food marked as picked up",
+
+                food:
+                    formatFood(
+                        updatedFood
+                    )
+            });
+        } catch (error) {
+            console.log(
+                "Pickup food error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to mark food as picked up"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// COMPLETE FOOD
+// ==================================================
+
+app.put(
+    "/api/food/:id/complete",
+    async (req, res) => {
+        try {
+            const {
+                userId
+            } = req.body;
+
+            if (
+                !userId ||
+                !isValidObjectId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Valid user ID is required"
+                });
+            }
+
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
+
+            const food =
+                await Food.findById(
+                    req.params.id
+                );
+
+            if (!food) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Food not found"
+                });
+            }
+
+            const isDonor =
+                food.donorId.toString() ===
+                userId.toString();
+
+            const isReceiver =
+                food.claimedBy &&
+                food.claimedBy.toString() ===
+                    userId.toString();
+
+            if (
+                !isDonor &&
+                !isReceiver
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You are not authorized to complete this food donation"
+                });
+            }
+
+            if (
+                food.status !==
+                    "picked_up" &&
+                food.status !==
+                    "distributed"
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Food must be picked up before completion"
+                });
+            }
+
+            food.status =
+                "completed";
+
+            food.completedAt =
+                new Date();
+
+            await food.save();
+
+            if (food.donorId) {
+                await createNotification({
+                    userId:
+                        food.donorId,
+
+                    title:
+                        "Donation Completed",
+
+                    message:
+                        `${food.foodName} donation has been completed.`,
+
+                    type:
+                        "completed",
+
+                    foodId:
+                        food._id
+                });
+            }
+
+            if (food.claimedBy) {
+                await createNotification({
+                    userId:
+                        food.claimedBy,
+
+                    title:
+                        "Food Completed",
+
+                    message:
+                        `${food.foodName} has been marked as completed.`,
+
+                    type:
+                        "completed",
+
+                    foodId:
+                        food._id
+                });
+            }
+
+            const updatedFood =
+                await Food
+                    .findById(
+                        food._id
+                    )
+                    .populate(
+                        "donorId",
+                        "name email phone address"
+                    )
+                    .populate(
+                        "claimedBy",
+                        "name email phone address"
+                    )
+                    .lean();
+
+            return res.json({
+                success: true,
+
+                message:
+                    "Food marked as completed",
+
+                food:
+                    formatFood(
+                        updatedFood
+                    )
+            });
+        } catch (error) {
+            console.log(
+                "Complete food error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to complete food"
             });
         }
     }
@@ -2090,65 +2416,68 @@ app.put(
 app.put(
     "/api/food/:id/cancel",
     async (req, res) => {
-
         try {
-
             const {
                 userId
             } = req.body;
 
+            if (
+                !userId ||
+                !isValidObjectId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Valid user ID is required"
+                });
+            }
+
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
 
             const food =
                 await Food.findById(
                     req.params.id
                 );
 
-
             if (!food) {
-
                 return res.status(404).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Food not found"
                 });
             }
 
-
             if (
-                !userId ||
                 food.donorId.toString() !==
                 userId.toString()
             ) {
-
                 return res.status(403).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Only the food donor can cancel this food"
                 });
             }
 
-
             if (
                 food.status !==
                 "available"
             ) {
-
                 return res.status(400).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Only available food can be cancelled"
                 });
             }
-
 
             food.status =
                 "cancelled";
@@ -2156,34 +2485,24 @@ app.put(
             food.cancelledAt =
                 new Date();
 
-
             await food.save();
 
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 message:
                     "Food cancelled successfully",
 
                 food
             });
-
-
         } catch (error) {
-
             console.log(
                 "Cancel food error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to cancel food"
             });
@@ -2193,78 +2512,99 @@ app.put(
 
 
 // ==================================================
-// MARK FOOD AS DISTRIBUTED
+// DISTRIBUTE FOOD
 // ==================================================
 
 app.put(
     "/api/food/:id/distribute",
     async (req, res) => {
-
         try {
-
             const {
                 userId
             } = req.body;
 
+            if (
+                !userId ||
+                !isValidObjectId(userId)
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Valid user ID is required"
+                });
+            }
+
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
 
             const food =
                 await Food.findById(
                     req.params.id
                 );
 
-
             if (!food) {
-
                 return res.status(404).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Food not found"
                 });
             }
 
-
             if (
-                !userId ||
                 food.donorId.toString() !==
                 userId.toString()
             ) {
-
                 return res.status(403).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Only the donor can mark food as distributed"
                 });
             }
 
-
             if (
                 food.status !==
                 "claimed"
             ) {
-
                 return res.status(400).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Food must be claimed before distribution"
                 });
             }
 
-
             food.status =
                 "distributed";
 
+            food.distributedAt =
+                new Date();
 
             await food.save();
 
+            await createNotification({
+                userId:
+                    food.claimedBy,
+
+                title:
+                    "Food Distributed",
+
+                message:
+                    `${food.foodName} has been marked as distributed.`,
+
+                type:
+                    "completed",
+
+                foodId:
+                    food._id
+            });
 
             const updatedFood =
                 await Food
@@ -2278,34 +2618,28 @@ app.put(
                     .populate(
                         "claimedBy",
                         "name email phone address"
-                    );
+                    )
+                    .lean();
 
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 message:
                     "Food marked as distributed",
 
                 food:
-                    updatedFood
+                    formatFood(
+                        updatedFood
+                    )
             });
-
-
         } catch (error) {
-
             console.log(
                 "Distribute food error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to mark food as distributed"
             });
@@ -2321,8 +2655,18 @@ app.put(
 app.put(
     "/api/food/:id",
     async (req, res) => {
-
         try {
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
 
             const {
                 foodName,
@@ -2337,185 +2681,169 @@ app.put(
                 status
             } = req.body;
 
-
             const updateData = {};
-
 
             if (
                 foodName !== undefined
-            )
+            ) {
                 updateData.foodName =
-                    foodName.trim();
-
+                    String(
+                        foodName
+                    ).trim();
+            }
 
             if (
                 foodType !== undefined
-            )
+            ) {
                 updateData.foodType =
                     foodType;
-
+            }
 
             if (
                 quantity !== undefined
-            )
+            ) {
                 updateData.quantity =
                     Number(quantity);
-
+            }
 
             if (
                 unit !== undefined
-            )
+            ) {
                 updateData.unit =
                     unit;
-
+            }
 
             if (
                 description !== undefined
-            )
+            ) {
                 updateData.description =
                     description;
-
-
-            // ==================================================
-            // IMPORTANT:
-            // IF LOCATION CHANGES,
-            // AUTOMATICALLY GEOCODE AGAIN
-            // ==================================================
+            }
 
             if (
                 location !== undefined
             ) {
-
                 const cleanLocation =
-                    location.trim();
+                    String(
+                        location
+                    ).trim();
+
+                if (!cleanLocation) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Location cannot be empty"
+                    });
+                }
 
                 updateData.location =
                     cleanLocation;
-
 
                 const geocoded =
                     await geocodeLocation(
                         cleanLocation
                     );
 
-
-                if (geocoded) {
-
-                    updateData.latitude =
-                        geocoded.latitude;
-
-                    updateData.longitude =
-                        geocoded.longitude;
-
-                } else {
-
+                if (!geocoded) {
                     return res.status(400).json({
-
-                        success:
-                            false,
-
+                        success: false,
                         message:
                             "Could not find the updated location"
                     });
                 }
+
+                updateData.latitude =
+                    geocoded.latitude;
+
+                updateData.longitude =
+                    geocoded.longitude;
             }
-
-
-            // ==================================================
-            // IF LATITUDE/LONGITUDE EXPLICITLY SENT
-            // ==================================================
 
             if (
                 location === undefined &&
                 latitude !== undefined
             ) {
-
                 updateData.latitude =
                     latitude === ""
                         ? null
                         : Number(latitude);
             }
 
-
             if (
                 location === undefined &&
                 longitude !== undefined
             ) {
-
                 updateData.longitude =
                     longitude === ""
                         ? null
                         : Number(longitude);
             }
 
-
             if (
                 expiryTime !== undefined
-            )
-                updateData.expiryTime =
+            ) {
+                const newExpiry =
                     new Date(
                         expiryTime
                     );
 
+                if (
+                    Number.isNaN(
+                        newExpiry.getTime()
+                    )
+                ) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Invalid expiry time"
+                    });
+                }
+
+                updateData.expiryTime =
+                    newExpiry;
+            }
 
             if (
                 status !== undefined
-            )
+            ) {
                 updateData.status =
                     status;
-
+            }
 
             const food =
                 await Food.findByIdAndUpdate(
-
                     req.params.id,
-
                     updateData,
-
                     {
                         new: true,
                         runValidators: true
                     }
                 );
 
-
             if (!food) {
-
                 return res.status(404).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Food not found"
                 });
             }
 
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 message:
                     "Food updated successfully",
 
                 food
             });
-
-
         } catch (error) {
-
             console.log(
                 "Update food error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to update food"
             });
@@ -2531,50 +2859,55 @@ app.put(
 app.delete(
     "/api/food/:id",
     async (req, res) => {
-
         try {
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
 
             const food =
                 await Food.findByIdAndDelete(
                     req.params.id
                 );
 
-
             if (!food) {
-
                 return res.status(404).json({
-
-                    success:
-                        false,
-
+                    success: false,
                     message:
                         "Food not found"
                 });
             }
 
+            await Notification.deleteMany({
+                foodId:
+                    food._id
+            });
 
-            res.json({
+            await Rating.deleteMany({
+                foodId:
+                    food._id
+            });
 
-                success:
-                    true,
-
+            return res.json({
+                success: true,
                 message:
                     "Food deleted successfully"
             });
-
-
         } catch (error) {
-
             console.log(
                 "Delete food error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to delete food"
             });
@@ -2584,27 +2917,708 @@ app.delete(
 
 
 // ==================================================
-// ADMIN DASHBOARD STATISTICS
+// NOTIFICATIONS - GET
+// ==================================================
+
+app.get(
+    "/api/notifications/:userId",
+    async (req, res) => {
+        try {
+            if (
+                !isValidObjectId(
+                    req.params.userId
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid user ID"
+                });
+            }
+
+            const notifications =
+                await Notification
+                    .find({
+                        userId:
+                            req.params.userId
+                    })
+                    .populate(
+                        "foodId",
+                        "foodName status"
+                    )
+                    .sort({
+                        createdAt: -1
+                    })
+                    .lean();
+
+            const unreadCount =
+                notifications.filter(
+                    (item) =>
+                        !item.read
+                ).length;
+
+            return res.json({
+                success: true,
+
+                count:
+                    notifications.length,
+
+                unreadCount,
+
+                notifications
+            });
+        } catch (error) {
+            console.log(
+                "Get notifications error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to fetch notifications"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// NOTIFICATION - MARK ONE READ
+// ==================================================
+
+app.put(
+    "/api/notifications/:id/read",
+    async (req, res) => {
+        try {
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid notification ID"
+                });
+            }
+
+            const notification =
+                await Notification.findByIdAndUpdate(
+                    req.params.id,
+                    {
+                        read:
+                            true
+                    },
+                    {
+                        new:
+                            true
+                    }
+                ).lean();
+
+            if (!notification) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Notification not found"
+                });
+            }
+
+            return res.json({
+                success: true,
+
+                message:
+                    "Notification marked as read",
+
+                notification
+            });
+        } catch (error) {
+            console.log(
+                "Read notification error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to update notification"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// NOTIFICATIONS - MARK ALL READ
+// ==================================================
+
+app.put(
+    "/api/notifications/:userId/read-all",
+    async (req, res) => {
+        try {
+            if (
+                !isValidObjectId(
+                    req.params.userId
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid user ID"
+                });
+            }
+
+            await Notification.updateMany(
+                {
+                    userId:
+                        req.params.userId,
+
+                    read:
+                        false
+                },
+                {
+                    $set: {
+                        read:
+                            true
+                    }
+                }
+            );
+
+            return res.json({
+                success: true,
+
+                message:
+                    "All notifications marked as read"
+            });
+        } catch (error) {
+            console.log(
+                "Read all notifications error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to update notifications"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// NOTIFICATIONS - DELETE
+// ==================================================
+
+app.delete(
+    "/api/notifications/:id",
+    async (req, res) => {
+        try {
+            if (
+                !isValidObjectId(
+                    req.params.id
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid notification ID"
+                });
+            }
+
+            const notification =
+                await Notification.findByIdAndDelete(
+                    req.params.id
+                );
+
+            if (!notification) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Notification not found"
+                });
+            }
+
+            return res.json({
+                success: true,
+
+                message:
+                    "Notification deleted"
+            });
+        } catch (error) {
+            console.log(
+                "Delete notification error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to delete notification"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// RATINGS - CREATE
+// ==================================================
+
+app.post(
+    "/api/ratings",
+    async (req, res) => {
+        try {
+            const {
+                foodId,
+                fromUser,
+                rating,
+                feedback
+            } = req.body;
+
+            if (
+                !foodId ||
+                !fromUser ||
+                rating === undefined
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Food ID, user ID and rating are required"
+                });
+            }
+
+            if (
+                !isValidObjectId(
+                    foodId
+                ) ||
+                !isValidObjectId(
+                    fromUser
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food or user ID"
+                });
+            }
+
+            const ratingValue =
+                Number(rating);
+
+            if (
+                !Number.isInteger(
+                    ratingValue
+                ) ||
+                ratingValue < 1 ||
+                ratingValue > 5
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Rating must be between 1 and 5"
+                });
+            }
+
+            const food =
+                await Food.findById(
+                    foodId
+                );
+
+            if (!food) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Food not found"
+                });
+            }
+
+            const isDonor =
+                food.donorId.toString() ===
+                fromUser.toString();
+
+            const isReceiver =
+                food.claimedBy &&
+                food.claimedBy.toString() ===
+                    fromUser.toString();
+
+            if (
+                !isDonor &&
+                !isReceiver
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You are not part of this food transaction"
+                });
+            }
+
+            if (
+                food.status !==
+                    "completed" &&
+                food.status !==
+                    "distributed" &&
+                food.status !==
+                    "picked_up"
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Rating is available after food pickup/completion"
+                });
+            }
+
+            const toUser =
+                isDonor
+                    ? food.claimedBy
+                    : food.donorId;
+
+            if (!toUser) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "The other user is not available for rating"
+                });
+            }
+
+            const existingRating =
+                await Rating.findOne({
+                    foodId,
+                    fromUser
+                });
+
+            if (existingRating) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "You have already rated this food transaction"
+                });
+            }
+
+            const newRating =
+                await Rating.create({
+                    foodId,
+
+                    fromUser,
+
+                    toUser,
+
+                    rating:
+                        ratingValue,
+
+                    feedback:
+                        feedback || ""
+                });
+
+            await createNotification({
+                userId:
+                    toUser,
+
+                title:
+                    "New Rating Received",
+
+                message:
+                    `You received a ${ratingValue}/5 rating for ${food.foodName}.`,
+
+                type:
+                    "system",
+
+                foodId:
+                    food._id
+            });
+
+            const populatedRating =
+                await Rating
+                    .findById(
+                        newRating._id
+                    )
+                    .populate(
+                        "fromUser",
+                        "name email"
+                    )
+                    .populate(
+                        "toUser",
+                        "name email"
+                    )
+                    .populate(
+                        "foodId",
+                        "foodName"
+                    )
+                    .lean();
+
+            return res.status(201).json({
+                success: true,
+
+                message:
+                    "Rating submitted successfully",
+
+                rating:
+                    populatedRating
+            });
+        } catch (error) {
+            console.log(
+                "Create rating error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to submit rating"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// RATINGS - GET FOR USER
+// ==================================================
+
+app.get(
+    "/api/ratings/user/:userId",
+    async (req, res) => {
+        try {
+            if (
+                !isValidObjectId(
+                    req.params.userId
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid user ID"
+                });
+            }
+
+            const ratings =
+                await Rating
+                    .find({
+                        toUser:
+                            req.params.userId
+                    })
+                    .populate(
+                        "fromUser",
+                        "name email"
+                    )
+                    .populate(
+                        "foodId",
+                        "foodName"
+                    )
+                    .sort({
+                        createdAt: -1
+                    })
+                    .lean();
+
+            const total =
+                ratings.length;
+
+            const average =
+                total > 0
+                    ? Number(
+                          (
+                              ratings.reduce(
+                                  (
+                                      sum,
+                                      item
+                                  ) =>
+                                      sum +
+                                      Number(
+                                          item.rating
+                                      ),
+                                  0
+                              ) /
+                              total
+                          ).toFixed(2)
+                      )
+                    : 0;
+
+            return res.json({
+                success: true,
+
+                count:
+                    total,
+
+                averageRating:
+                    average,
+
+                ratings
+            });
+        } catch (error) {
+            console.log(
+                "Get user ratings error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to fetch ratings"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// RATINGS - GET FOR FOOD
+// ==================================================
+
+app.get(
+    "/api/ratings/food/:foodId",
+    async (req, res) => {
+        try {
+            if (
+                !isValidObjectId(
+                    req.params.foodId
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid food ID"
+                });
+            }
+
+            const ratings =
+                await Rating
+                    .find({
+                        foodId:
+                            req.params.foodId
+                    })
+                    .populate(
+                        "fromUser",
+                        "name email"
+                    )
+                    .populate(
+                        "toUser",
+                        "name email"
+                    )
+                    .sort({
+                        createdAt: -1
+                    })
+                    .lean();
+
+            const average =
+                ratings.length > 0
+                    ? Number(
+                          (
+                              ratings.reduce(
+                                  (
+                                      sum,
+                                      item
+                                  ) =>
+                                      sum +
+                                      Number(
+                                          item.rating
+                                      ),
+                                  0
+                              ) /
+                              ratings.length
+                          ).toFixed(2)
+                      )
+                    : 0;
+
+            return res.json({
+                success: true,
+
+                count:
+                    ratings.length,
+
+                averageRating:
+                    average,
+
+                ratings
+            });
+        } catch (error) {
+            console.log(
+                "Get food ratings error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to fetch food ratings"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// ADMIN - ALL FOOD
+// ==================================================
+
+app.get(
+    "/api/admin/food",
+    async (req, res) => {
+        try {
+            const foods =
+                await Food
+                    .find()
+                    .populate(
+                        "donorId",
+                        "name email phone address"
+                    )
+                    .populate(
+                        "claimedBy",
+                        "name email phone address"
+                    )
+                    .sort({
+                        createdAt: -1
+                    })
+                    .lean();
+
+            return res.json({
+                success: true,
+
+                count:
+                    foods.length,
+
+                foods:
+                    foods.map(
+                        (food) =>
+                            formatFood(food)
+                    )
+            });
+        } catch (error) {
+            console.log(
+                "Admin food error:",
+                error.message
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to fetch all food"
+            });
+        }
+    }
+);
+
+
+// ==================================================
+// ADMIN STATS
 // ==================================================
 
 app.get(
     "/api/admin/stats",
     async (req, res) => {
-
         try {
+            const now =
+                new Date();
 
             await Food.updateMany(
-
                 {
                     status:
                         "available",
 
                     expiryTime: {
                         $lt:
-                            new Date()
+                            now
                     }
                 },
-
                 {
                     $set: {
                         status:
@@ -2613,78 +3627,86 @@ app.get(
                 }
             );
 
+            const [
+                totalUsers,
+                totalDonors,
+                totalReceivers,
+                totalAdmins,
+                totalFood,
+                availableFood,
+                claimedFood,
+                pickedUpFood,
+                completedFood,
+                cancelledFood,
+                expiredFood,
+                distributedFood,
+                totalNotifications,
+                totalRatings
+            ] =
+                await Promise.all([
+                    User.countDocuments(),
 
-            const totalUsers =
-                await User.countDocuments();
+                    User.countDocuments({
+                        role:
+                            "donor"
+                    }),
 
+                    User.countDocuments({
+                        role:
+                            "receiver"
+                    }),
 
-            const totalDonors =
-                await User.countDocuments({
-                    role:
-                        "donor"
-                });
+                    User.countDocuments({
+                        role:
+                            "admin"
+                    }),
 
+                    Food.countDocuments(),
 
-            const totalReceivers =
-                await User.countDocuments({
-                    role:
-                        "receiver"
-                });
+                    Food.countDocuments({
+                        status:
+                            "available"
+                    }),
 
+                    Food.countDocuments({
+                        status:
+                            "claimed"
+                    }),
 
-            const totalAdmins =
-                await User.countDocuments({
-                    role:
-                        "admin"
-                });
+                    Food.countDocuments({
+                        status:
+                            "picked_up"
+                    }),
 
+                    Food.countDocuments({
+                        status:
+                            "completed"
+                    }),
 
-            const totalFood =
-                await Food.countDocuments();
+                    Food.countDocuments({
+                        status:
+                            "cancelled"
+                    }),
 
+                    Food.countDocuments({
+                        status:
+                            "expired"
+                    }),
 
-            const availableFood =
-                await Food.countDocuments({
-                    status:
-                        "available"
-                });
+                    Food.countDocuments({
+                        status:
+                            "distributed"
+                    }),
 
+                    Notification.countDocuments(),
 
-            const claimedFood =
-                await Food.countDocuments({
-                    status:
-                        "claimed"
-                });
+                    Rating.countDocuments()
+                ]);
 
-
-            const cancelledFood =
-                await Food.countDocuments({
-                    status:
-                        "cancelled"
-                });
-
-
-            const expiredFood =
-                await Food.countDocuments({
-                    status:
-                        "expired"
-                });
-
-
-            const distributedFood =
-                await Food.countDocuments({
-                    status:
-                        "distributed"
-                });
-
-
-            res.json({
-
-                success:
-                    true,
+            return res.json({
+                success: true,
 
                 stats: {
-
                     totalUsers,
 
                     totalDonors,
@@ -2699,27 +3721,29 @@ app.get(
 
                     claimedFood,
 
+                    pickedUpFood,
+
+                    completedFood,
+
                     cancelledFood,
 
                     expiredFood,
 
-                    distributedFood
+                    distributedFood,
+
+                    totalNotifications,
+
+                    totalRatings
                 }
             });
-
-
         } catch (error) {
-
             console.log(
                 "Admin stats error:",
                 error.message
             );
 
-            res.status(500).json({
-
-                success:
-                    false,
-
+            return res.status(500).json({
+                success: false,
                 message:
                     "Failed to fetch admin statistics"
             });
@@ -2729,17 +3753,62 @@ app.get(
 
 
 // ==================================================
-// SERVER
+// HEALTH CHECK
 // ==================================================
 
-const PORT =
-    process.env.PORT || 5000;
+app.get("/api/health", (req, res) => {
+    res.status(200).json({
+        success: true,
+        server: "running",
+        time: new Date().toISOString()
+    });
+});
 
+
+// ==================================================
+// 404 HANDLER
+// ==================================================
+
+app.use(
+    (req, res) => {
+        res.status(404).json({
+            success: false,
+
+            message:
+                "API endpoint not found"
+        });
+    }
+);
+
+
+// ==================================================
+// ERROR HANDLER
+// ==================================================
+
+app.use(
+    (error, req, res, next) => {
+        console.log(
+            "Unhandled server error:",
+            error
+        );
+
+        res.status(500).json({
+            success: false,
+
+            message:
+                "Internal server error"
+        });
+    }
+);
+
+
+// ==================================================
+// START SERVER
+// ==================================================
 
 app.listen(
     PORT,
     () => {
-
         console.log(
             `Server running on port ${PORT}`
         );
@@ -2747,6 +3816,5 @@ app.listen(
         console.log(
             `http://localhost:${PORT}`
         );
-
     }
 );
