@@ -198,26 +198,20 @@ function useCurrentLocation() {
 // ==================================================
 
 function DistanceInfo({
+  foodId,
   location,
   userCoords,
 }) {
   const [info, setInfo] = useState(null);
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [errorMessage, setErrorMessage] =
-    useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
     const calculateRoute = async () => {
-      if (!userCoords) {
-        return;
-      }
-
-      if (!location || !location.trim()) {
+      if (!userCoords || !foodId || !location?.trim()) {
+        setInfo(null);
         return;
       }
 
@@ -226,143 +220,44 @@ function DistanceInfo({
       setErrorMessage("");
 
       try {
-        // ------------------------------------------
-        // STEP 1: GEOCODE FOOD LOCATION
-        // ------------------------------------------
-
-        const geocodeResponse =
-          await axios.get(
-            "https://nominatim.openstreetmap.org/search",
-            {
-              params: {
-                q: location.trim(),
-                format: "json",
-                limit: 1,
-                addressdetails: 1,
-              },
-              headers: {
-                Accept:
-                  "application/json",
-              },
-              timeout: 15000,
-            }
-          );
-
-        if (
-          !geocodeResponse.data ||
-          geocodeResponse.data.length === 0
-        ) {
-          throw new Error(
-            "Food location could not be found. Please enter a more complete location."
-          );
-        }
-
-        const destination =
-          geocodeResponse.data[0];
-
-        const destinationLat =
-          Number(destination.lat);
-
-        const destinationLon =
-          Number(destination.lon);
-
-        if (
-          Number.isNaN(destinationLat) ||
-          Number.isNaN(destinationLon)
-        ) {
-          throw new Error(
-            "Invalid food location coordinates."
-          );
-        }
-
-        // ------------------------------------------
-        // STEP 2: ROAD ROUTING
-        // ------------------------------------------
-
-        const routeResponse =
-          await axios.get(
-            `https://router.project-osrm.org/route/v1/driving/${userCoords.lon},${userCoords.lat};${destinationLon},${destinationLat}`,
-            {
-              params: {
-                overview: "false",
-                steps: false,
-              },
-              timeout: 15000,
-            }
-          );
-
-        if (
-          !routeResponse.data ||
-          routeResponse.data.code !== "Ok" ||
-          !routeResponse.data.routes ||
-          routeResponse.data.routes.length === 0
-        ) {
-          throw new Error(
-            "Road route could not be calculated."
-          );
-        }
-
-        const route =
-          routeResponse.data.routes[0];
-
-        // ------------------------------------------
-        // DISTANCE
-        // ------------------------------------------
-
-        const distanceKm =
-          route.distance / 1000;
-
-        // ------------------------------------------
-        // TRAVEL TIME
-        // ------------------------------------------
-
-        const totalMinutes = Math.max(
-          1,
-          Math.round(route.duration / 60)
+        const response = await axios.get(
+          `${API}/food/${foodId}/route`,
+          {
+            params: {
+              latitude: userCoords.lat,
+              longitude: userCoords.lon,
+            },
+            timeout: 30000,
+          }
         );
 
-        let travelTime = "";
-
-        if (totalMinutes < 60) {
-          travelTime =
-            `${totalMinutes} mins`;
-        } else {
-          const hours =
-            Math.floor(totalMinutes / 60);
-
-          const minutes =
-            totalMinutes % 60;
-
-          if (minutes === 0) {
-            travelTime =
-              `${hours} hr`;
-          } else {
-            travelTime =
-              `${hours} hr ${minutes} mins`;
-          }
+        if (
+          !response.data?.success ||
+          !response.data?.route
+        ) {
+          throw new Error(
+            response.data?.message ||
+              "Unable to calculate road route."
+          );
         }
+
+        const route = response.data.route;
 
         if (!cancelled) {
           setInfo({
-            distance:
-              `${distanceKm.toFixed(2)} km`,
-            time: travelTime,
+            distance: `${Number(route.distanceKm).toFixed(2)} km`,
+            time: route.travelTime || "Travel time unavailable",
             destination:
-              destination.display_name ||
-              location,
+              response.data.foodLocation || location,
           });
-
-          setErrorMessage("");
         }
       } catch (error) {
-        console.log(
-          "Distance calculation error:",
-          error
-        );
+        console.log("Distance calculation error:", error);
 
         if (!cancelled) {
           setErrorMessage(
-            error.message ||
+            error.response?.data?.message ||
+              error.message ||
               "Unable to calculate road distance."
           );
         }
@@ -379,6 +274,7 @@ function DistanceInfo({
       cancelled = true;
     };
   }, [
+    foodId,
     location,
     userCoords?.lat,
     userCoords?.lon,
@@ -386,15 +282,7 @@ function DistanceInfo({
 
   if (!userCoords) {
     return (
-      <div
-        style={{
-          marginTop: "10px",
-          padding: "10px",
-          borderRadius: "10px",
-          background:
-            "rgba(255,255,255,0.12)",
-        }}
-      >
+      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
         📍 Getting your current location...
       </div>
     );
@@ -402,73 +290,29 @@ function DistanceInfo({
 
   if (loading) {
     return (
-      <div
-        style={{
-          marginTop: "10px",
-          padding: "10px",
-          borderRadius: "10px",
-          background:
-            "rgba(255,255,255,0.12)",
-        }}
-      >
-        🔄 Calculating road distance and travel
-        time...
+      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
+        🔄 Calculating road distance and travel time...
       </div>
     );
   }
 
   if (errorMessage) {
     return (
-      <div
-        style={{
-          marginTop: "10px",
-          padding: "10px",
-          borderRadius: "10px",
-          background:
-            "rgba(255,255,255,0.12)",
-        }}
-      >
+      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
         ⚠️ {errorMessage}
       </div>
     );
   }
 
-  if (!info) {
-    return null;
-  }
+  if (!info) return null;
 
   return (
-    <div
-      style={{
-        marginTop: "10px",
-        padding: "12px",
-        borderRadius: "10px",
-        background:
-          "rgba(255,255,255,0.15)",
-        lineHeight: "1.8",
-      }}
-    >
-      📏{" "}
-      <strong>
-        Road Distance:
-      </strong>{" "}
-      {info.distance}
-
+    <div style={{ marginTop: "10px", padding: "12px", borderRadius: "10px", background: "rgba(255,255,255,0.15)", lineHeight: "1.8" }}>
+      📏 <strong>Road Distance:</strong> {info.distance}
       <br />
-
-      🚗{" "}
-      <strong>
-        Estimated Travel Time:
-      </strong>{" "}
-      {info.time}
-
+      🚗 <strong>Estimated Travel Time:</strong> {info.time}
       <br />
-
-      📍{" "}
-      <strong>
-        Found Location:
-      </strong>{" "}
-      {info.destination}
+      📍 <strong>Route Location:</strong> {info.destination}
     </div>
   );
 }
@@ -1251,7 +1095,6 @@ function Register({
       phone: "",
       address: "",
       password: "",
-      role: "donor",
     });
 
   const [message, setMessage] =
@@ -1375,21 +1218,6 @@ function Register({
             required
             disabled={loading}
           />
-
-          <select
-            name="role"
-            value={form.role}
-            onChange={handleChange}
-            disabled={loading}
-          >
-            <option value="donor">
-              Food Donor
-            </option>
-
-            <option value="receiver">
-              Food Receiver
-            </option>
-          </select>
 
           <button
             className="primary-btn"
@@ -2037,23 +1865,10 @@ function UserDashboard({
 
             <br />
 
-            🧭 Current GPS:
-            {" "}
-            {userCoords.lat.toFixed(
-              5
-            )}
-            ,{" "}
-            {userCoords.lon.toFixed(
-              5
-            )}
-
-            <br />
-
             🚗 Every food card calculates
-            the road distance and
-            estimated travel time
-            separately from your
-            current location.
+            road distance and estimated
+            travel time from your current
+            location.
           </div>
         )}
 
@@ -2343,6 +2158,7 @@ function UserDashboard({
                   {/* SEPARATE DISTANCE */}
 
                   <DistanceInfo
+                    foodId={item._id}
                     location={
                       item.location
                     }
@@ -2454,6 +2270,7 @@ function UserDashboard({
                   />
 
                   <DistanceInfo
+                    foodId={item._id}
                     location={
                       item.location
                     }
@@ -2521,6 +2338,7 @@ function UserDashboard({
                     </p>
 
                     <DistanceInfo
+                      foodId={item._id}
                       location={
                         item.location
                       }
