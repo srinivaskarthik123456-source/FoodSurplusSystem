@@ -13,7 +13,6 @@ const Rating = require("./models/Rating");
 
 const app = express();
 
-
 // ==================================================
 // BASIC CONFIG
 // ==================================================
@@ -27,7 +26,6 @@ app.use(
 
 app.use(express.json());
 
-
 // ==================================================
 // CONFIG
 // ==================================================
@@ -37,7 +35,6 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET =
     process.env.JWT_SECRET ||
     "food_surplus_secret";
-
 
 // ==================================================
 // MONGODB CONNECTION
@@ -59,7 +56,6 @@ mongoose
         );
     });
 
-
 // ==================================================
 // HOME
 // ==================================================
@@ -72,7 +68,6 @@ app.get("/", (req, res) => {
     });
 });
 
-
 // ==================================================
 // HELPER - VALID OBJECT ID
 // ==================================================
@@ -80,7 +75,6 @@ app.get("/", (req, res) => {
 function isValidObjectId(id) {
     return mongoose.Types.ObjectId.isValid(id);
 }
-
 
 // ==================================================
 // HELPER - CREATE NOTIFICATION
@@ -98,16 +92,13 @@ async function createNotification({
             return null;
         }
 
-        const notification =
-            await Notification.create({
-                userId,
-                title,
-                message,
-                type,
-                foodId
-            });
-
-        return notification;
+        return await Notification.create({
+            userId,
+            title,
+            message,
+            type,
+            foodId
+        });
     } catch (error) {
         console.log(
             "Notification error:",
@@ -118,9 +109,9 @@ async function createNotification({
     }
 }
 
-
 // ==================================================
 // GEOCODING - NOMINATIM
+// IMPROVED LOCATION SEARCH
 // ==================================================
 
 async function geocodeLocation(location) {
@@ -132,66 +123,223 @@ async function geocodeLocation(location) {
             return null;
         }
 
-        const cleanLocation =
+        const originalLocation =
             String(location).trim();
 
-        const query =
-            encodeURIComponent(
-                cleanLocation
+        // Try multiple search formats
+        const searchQueries = [];
+
+        // 1. Exact user input
+        searchQueries.push(
+            originalLocation
+        );
+
+        // 2. Add India
+        if (
+            !originalLocation
+                .toLowerCase()
+                .includes("india")
+        ) {
+            searchQueries.push(
+                `${originalLocation}, India`
             );
+        }
 
-        const url =
-            "https://nominatim.openstreetmap.org/search" +
-            "?format=jsonv2&limit=1&q=" +
-            query;
+        // 3. Andhra Pradesh fallback
+        // Only as a fallback, NOT forced for every location
+        const lower =
+            originalLocation.toLowerCase();
 
-        const response =
-            await fetch(url, {
-                headers: {
-                    "User-Agent":
-                        "FoodSurplusSystem/1.0"
+        const likelyAndhraLocation =
+            lower.includes("tuni") ||
+            lower.includes("rajahmundry") ||
+            lower.includes("rajahmahendravaram") ||
+            lower.includes("vijayawada") ||
+            lower.includes("visakhapatnam") ||
+            lower.includes("vizag") ||
+            lower.includes("kakinada") ||
+            lower.includes("tirupati") ||
+            lower.includes("nellore") ||
+            lower.includes("guntur") ||
+            lower.includes("eluru") ||
+            lower.includes("kadapa") ||
+            lower.includes("anantapur") ||
+            lower.includes("kurnool");
+
+        if (
+            likelyAndhraLocation &&
+            !lower.includes("andhra pradesh")
+        ) {
+            searchQueries.push(
+                `${originalLocation}, Andhra Pradesh, India`
+            );
+        }
+
+        for (
+            const searchQuery of searchQueries
+        ) {
+            try {
+                const query =
+                    encodeURIComponent(
+                        searchQuery
+                    );
+
+                const url =
+                    "https://nominatim.openstreetmap.org/search" +
+                    "?format=jsonv2" +
+                    "&addressdetails=1" +
+                    "&limit=5" +
+                    "&countrycodes=in" +
+                    "&accept-language=en" +
+                    "&q=" +
+                    query;
+
+                console.log(
+                    "Trying location:",
+                    searchQuery
+                );
+
+                const response =
+                    await fetch(url, {
+                        headers: {
+                            "User-Agent":
+                                "FoodSurplusSystem/1.0"
+                        }
+                    });
+
+                if (!response.ok) {
+                    console.log(
+                        "Geocoding HTTP error:",
+                        response.status
+                    );
+
+                    continue;
                 }
-            });
 
-        if (!response.ok) {
-            console.log(
-                "Geocoding failed:",
-                response.status
-            );
+                const results =
+                    await response.json();
 
-            return null;
+                if (
+                    !Array.isArray(results) ||
+                    results.length === 0
+                ) {
+                    continue;
+                }
+
+                // Prefer results that are actually in India
+                const indiaResults =
+                    results.filter(
+                        (item) => {
+                            const address =
+                                item.address ||
+                                {};
+
+                            const country =
+                                String(
+                                    address.country ||
+                                    ""
+                                ).toLowerCase();
+
+                            return (
+                                country ===
+                                    "india" ||
+                                String(
+                                    item.display_name ||
+                                    ""
+                                )
+                                    .toLowerCase()
+                                    .includes(
+                                        "india"
+                                    )
+                            );
+                        }
+                    );
+
+                const candidates =
+                    indiaResults.length > 0
+                        ? indiaResults
+                        : results;
+
+                // For Andhra locations, prefer Andhra Pradesh
+                let selected =
+                    candidates[0];
+
+                if (
+                    likelyAndhraLocation
+                ) {
+                    const andhraResult =
+                        candidates.find(
+                            (item) => {
+                                const address =
+                                    item.address ||
+                                    {};
+
+                                return String(
+                                    address.state ||
+                                    ""
+                                )
+                                    .toLowerCase()
+                                    .includes(
+                                        "andhra pradesh"
+                                    );
+                            }
+                        );
+
+                    if (
+                        andhraResult
+                    ) {
+                        selected =
+                            andhraResult;
+                    }
+                }
+
+                const latitude =
+                    Number(
+                        selected.lat
+                    );
+
+                const longitude =
+                    Number(
+                        selected.lon
+                    );
+
+                if (
+                    !Number.isFinite(
+                        latitude
+                    ) ||
+                    !Number.isFinite(
+                        longitude
+                    )
+                ) {
+                    continue;
+                }
+
+                console.log(
+                    "Location found:",
+                    selected.display_name
+                );
+
+                return {
+                    latitude,
+                    longitude,
+                    displayName:
+                        selected.display_name ||
+                        originalLocation
+                };
+            } catch (searchError) {
+                console.log(
+                    "Location search error:",
+                    searchError.message
+                );
+            }
         }
 
-        const results =
-            await response.json();
+        console.log(
+            "Could not geocode location:",
+            originalLocation
+        );
 
-        if (
-            !Array.isArray(results) ||
-            results.length === 0
-        ) {
-            return null;
-        }
-
-        const latitude =
-            Number(results[0].lat);
-
-        const longitude =
-            Number(results[0].lon);
-
-        if (
-            !Number.isFinite(latitude) ||
-            !Number.isFinite(longitude)
-        ) {
-            return null;
-        }
-
-        return {
-            latitude,
-            longitude,
-            displayName:
-                results[0].display_name ||
-                cleanLocation
-        };
+        return null;
     } catch (error) {
         console.log(
             "Geocoding error:",
@@ -201,7 +349,6 @@ async function geocodeLocation(location) {
         return null;
     }
 }
-
 
 // ==================================================
 // ROAD ROUTE - OSRM
@@ -235,22 +382,53 @@ async function getRoadRoute(
             return null;
         }
 
+        if (
+            originLat < -90 ||
+            originLat > 90 ||
+            destinationLat < -90 ||
+            destinationLat > 90 ||
+            originLon < -180 ||
+            originLon > 180 ||
+            destinationLon < -180 ||
+            destinationLon > 180
+        ) {
+            return null;
+        }
+
         const coordinates =
-            String(originLon) +
-            "," +
-            String(originLat) +
-            ";" +
-            String(destinationLon) +
-            "," +
-            String(destinationLat);
+            `${originLon},${originLat};${destinationLon},${destinationLat}`;
 
         const url =
             "https://router.project-osrm.org/route/v1/driving/" +
             coordinates +
-            "?overview=false";
+            "?overview=false&alternatives=false";
 
-        const response =
-            await fetch(url);
+        const controller =
+            new AbortController();
+
+        const timeout =
+            setTimeout(() => {
+                controller.abort();
+            }, 30000);
+
+        let response;
+
+        try {
+            response =
+                await fetch(url, {
+                    signal:
+                        controller.signal,
+
+                    headers: {
+                        "Accept":
+                            "application/json",
+                        "User-Agent":
+                            "FoodSurplusSystem/1.0"
+                    }
+                });
+        } finally {
+            clearTimeout(timeout);
+        }
 
         if (!response.ok) {
             console.log(
@@ -266,7 +444,9 @@ async function getRoadRoute(
 
         if (
             data.code !== "Ok" ||
-            !Array.isArray(data.routes) ||
+            !Array.isArray(
+                data.routes
+            ) ||
             data.routes.length === 0
         ) {
             return null;
@@ -315,11 +495,17 @@ async function getRoadRoute(
             const minutes =
                 durationMinutes % 60;
 
-            travelTime =
-                hours +
-                " hr " +
-                minutes +
-                " mins";
+            if (minutes === 0) {
+                travelTime =
+                    hours +
+                    " hr";
+            } else {
+                travelTime =
+                    hours +
+                    " hr " +
+                    minutes +
+                    " mins";
+            }
         }
 
         return {
@@ -348,7 +534,6 @@ async function getRoadRoute(
         return null;
     }
 }
-
 
 // ==================================================
 // HAVERSINE DISTANCE
@@ -397,10 +582,12 @@ function calculateStraightDistance(
         Math.sin(dLat / 2) *
             Math.sin(dLat / 2) +
         Math.cos(
-            (lat1 * Math.PI) / 180
+            (lat1 * Math.PI) /
+                180
         ) *
             Math.cos(
-                (lat2 * Math.PI) / 180
+                (lat2 * Math.PI) /
+                    180
             ) *
             Math.sin(dLon / 2) *
             Math.sin(dLon / 2);
@@ -418,7 +605,6 @@ function calculateStraightDistance(
         ).toFixed(2)
     );
 }
-
 
 // ==================================================
 // FORMAT FOOD
@@ -465,7 +651,6 @@ function formatFood(food) {
                 : ""
     };
 }
-
 
 // ==================================================
 // REGISTER
@@ -610,7 +795,6 @@ app.post(
     }
 );
 
-
 // ==================================================
 // LOGIN
 // ==================================================
@@ -733,7 +917,6 @@ app.post(
     }
 );
 
-
 // ==================================================
 // GET ALL USERS
 // ==================================================
@@ -771,7 +954,6 @@ app.get(
         }
     }
 );
-
 
 // ==================================================
 // GET SINGLE USER
@@ -827,7 +1009,6 @@ app.get(
         }
     }
 );
-
 
 // ==================================================
 // UPDATE USER
@@ -946,7 +1127,6 @@ app.put(
     }
 );
 
-
 // ==================================================
 // DELETE USER
 // ==================================================
@@ -999,7 +1179,6 @@ app.delete(
         }
     }
 );
-
 
 // ==================================================
 // ADD FOOD
@@ -1063,45 +1242,30 @@ app.post(
                 });
             }
 
-            let finalLatitude =
-                latitude !== undefined &&
-                latitude !== ""
-                    ? Number(latitude)
-                    : null;
+            /*
+             * IMPORTANT:
+             * Always geocode location text while
+             * creating food.
+             */
 
-            let finalLongitude =
-                longitude !== undefined &&
-                longitude !== ""
-                    ? Number(longitude)
-                    : null;
+            const geocoded =
+                await geocodeLocation(
+                    location
+                );
 
-            if (
-                !Number.isFinite(
-                    finalLatitude
-                ) ||
-                !Number.isFinite(
-                    finalLongitude
-                )
-            ) {
-                const geocoded =
-                    await geocodeLocation(
-                        location
-                    );
-
-                if (!geocoded) {
-                    return res.status(400).json({
-                        success: false,
-                        message:
-                            "Could not find this location. Please enter a more specific location."
-                    });
-                }
-
-                finalLatitude =
-                    geocoded.latitude;
-
-                finalLongitude =
-                    geocoded.longitude;
+            if (!geocoded) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Could not find this location. Please enter a more specific location."
+                });
             }
+
+            const finalLatitude =
+                geocoded.latitude;
+
+            const finalLongitude =
+                geocoded.longitude;
 
             const finalExpiry =
                 new Date(expiryTime);
@@ -1164,6 +1328,14 @@ app.post(
                         "available"
                 });
 
+            console.log(
+                "Food created:",
+                food.foodName,
+                food.location,
+                food.latitude,
+                food.longitude
+            );
+
             return res.status(201).json({
                 success: true,
 
@@ -1188,10 +1360,8 @@ app.post(
     }
 );
 
-
 // ==================================================
 // GET AVAILABLE FOOD
-// SEARCH + FILTER + NEARBY
 // ==================================================
 
 app.get(
@@ -1274,6 +1444,12 @@ app.get(
                     })
                     .lean();
 
+            /*
+             * Keep this distance only for search/filter.
+             * Frontend displayed distance uses the
+             * dedicated OSRM road route endpoint.
+             */
+
             if (
                 latitude !== undefined &&
                 longitude !== undefined &&
@@ -1337,20 +1513,17 @@ app.get(
                 }
             }
 
-            const formattedFoods =
-                foods.map(
-                    (food) =>
-                        formatFood(food)
-                );
-
             return res.json({
                 success: true,
 
                 count:
-                    formattedFoods.length,
+                    foods.length,
 
                 foods:
-                    formattedFoods
+                    foods.map(
+                        (food) =>
+                            formatFood(food)
+                    )
             });
         } catch (error) {
             console.log(
@@ -1366,7 +1539,6 @@ app.get(
         }
     }
 );
-
 
 // ==================================================
 // NEARBY FOOD
@@ -1511,7 +1683,6 @@ app.get(
     }
 );
 
-
 // ==================================================
 // ROUTE API
 // ==================================================
@@ -1583,9 +1754,8 @@ app.get(
     }
 );
 
-
 // ==================================================
-// FOOD ROUTE
+// FOOD ROUTE - IMPORTANT
 // ==================================================
 
 app.get(
@@ -1597,14 +1767,24 @@ app.get(
                 longitude
             } = req.query;
 
+            const userLatitude =
+                Number(latitude);
+
+            const userLongitude =
+                Number(longitude);
+
             if (
-                latitude === undefined ||
-                longitude === undefined
+                !Number.isFinite(
+                    userLatitude
+                ) ||
+                !Number.isFinite(
+                    userLongitude
+                )
             ) {
                 return res.status(400).json({
                     success: false,
                     message:
-                        "Your current latitude and longitude are required"
+                        "Your current location could not be detected"
                 });
             }
 
@@ -1633,36 +1813,61 @@ app.get(
                 });
             }
 
-            if (
-                !Number.isFinite(
-                    Number(food.latitude)
-                ) ||
-                !Number.isFinite(
-                    Number(food.longitude)
-                )
-            ) {
+            /*
+             * VERY IMPORTANT:
+             *
+             * Do NOT trust old saved latitude/
+             * longitude.
+             *
+             * Get fresh coordinates from the
+             * actual location text.
+             */
+
+            const foodCoordinates =
+                await ensureFoodCoordinates(
+                    food
+                );
+
+            if (!foodCoordinates) {
                 return res.status(400).json({
                     success: false,
                     message:
-                        "Food location coordinates are not available"
+                        "Could not identify the food location. Please enter a more specific location."
                 });
             }
 
             const route =
                 await getRoadRoute(
-                    Number(latitude),
-                    Number(longitude),
-                    Number(food.latitude),
-                    Number(food.longitude)
+                    userLatitude,
+                    userLongitude,
+
+                    foodCoordinates.latitude,
+                    foodCoordinates.longitude
                 );
 
             if (!route) {
-                return res.status(404).json({
+                return res.status(503).json({
                     success: false,
                     message:
-                        "Unable to calculate route"
+                        "Road distance is temporarily unavailable"
                 });
             }
+
+            console.log(
+                "ROAD ROUTE:",
+                food.location,
+                "| USER:",
+                userLatitude,
+                userLongitude,
+                "| FOOD:",
+                foodCoordinates.latitude,
+                foodCoordinates.longitude,
+                "| DISTANCE:",
+                route.distanceKm,
+                "KM",
+                "| TIME:",
+                route.travelTime
+            );
 
             return res.json({
                 success: true,
@@ -1670,23 +1875,41 @@ app.get(
                 foodId:
                     food._id,
 
+                foodLocation:
+                    food.location,
+
                 origin: {
                     latitude:
-                        Number(latitude),
+                        userLatitude,
 
                     longitude:
-                        Number(longitude)
+                        userLongitude
                 },
 
                 destination: {
                     latitude:
-                        Number(food.latitude),
+                        foodCoordinates.latitude,
 
                     longitude:
-                        Number(food.longitude)
+                        foodCoordinates.longitude
                 },
 
-                route
+                route: {
+                    distanceKm:
+                        route.distanceKm,
+
+                    distanceMeters:
+                        route.distanceMeters,
+
+                    durationMinutes:
+                        route.durationMinutes,
+
+                    durationSeconds:
+                        route.durationSeconds,
+
+                    travelTime:
+                        route.travelTime
+                }
             });
         } catch (error) {
             console.log(
@@ -1703,10 +1926,8 @@ app.get(
     }
 );
 
-
 // ==================================================
 // GET FOOD BY DONOR
-// IMPORTANT: BEFORE /api/food/:id
 // ==================================================
 
 app.get(
@@ -1766,7 +1987,6 @@ app.get(
         }
     }
 );
-
 
 // ==================================================
 // GET FOOD BY RECEIVER
@@ -1829,7 +2049,6 @@ app.get(
         }
     }
 );
-
 
 // ==================================================
 // GET FOOD BY ID
@@ -1894,7 +2113,6 @@ app.get(
         }
     }
 );
-
 
 // ==================================================
 // CLAIM FOOD
@@ -2084,7 +2302,6 @@ app.put(
     }
 );
 
-
 // ==================================================
 // PICK UP FOOD
 // ==================================================
@@ -2238,7 +2455,6 @@ app.put(
         }
     }
 );
-
 
 // ==================================================
 // COMPLETE FOOD
@@ -2402,12 +2618,11 @@ app.put(
             return res.status(500).json({
                 success: false,
                 message:
-                    "Failed to complete food"
+                    "Failed to mark food as completed"
             });
         }
     }
 );
-
 
 // ==================================================
 // CANCEL FOOD
@@ -2509,7 +2724,6 @@ app.put(
         }
     }
 );
-
 
 // ==================================================
 // DISTRIBUTE FOOD
@@ -2646,7 +2860,6 @@ app.put(
         }
     }
 );
-
 
 // ==================================================
 // UPDATE FOOD
@@ -2851,7 +3064,6 @@ app.put(
     }
 );
 
-
 // ==================================================
 // DELETE FOOD
 // ==================================================
@@ -2914,7 +3126,6 @@ app.delete(
         }
     }
 );
-
 
 // ==================================================
 // NOTIFICATIONS - GET
@@ -2982,7 +3193,6 @@ app.get(
     }
 );
 
-
 // ==================================================
 // NOTIFICATION - MARK ONE READ
 // ==================================================
@@ -3047,7 +3257,6 @@ app.put(
     }
 );
 
-
 // ==================================================
 // NOTIFICATIONS - MARK ALL READ
 // ==================================================
@@ -3105,7 +3314,6 @@ app.put(
     }
 );
 
-
 // ==================================================
 // NOTIFICATIONS - DELETE
 // ==================================================
@@ -3159,7 +3367,6 @@ app.delete(
         }
     }
 );
-
 
 // ==================================================
 // RATINGS - CREATE
@@ -3370,7 +3577,6 @@ app.post(
     }
 );
 
-
 // ==================================================
 // RATINGS - GET FOR USER
 // ==================================================
@@ -3459,7 +3665,6 @@ app.get(
     }
 );
 
-
 // ==================================================
 // RATINGS - GET FOR FOOD
 // ==================================================
@@ -3545,7 +3750,6 @@ app.get(
     }
 );
 
-
 // ==================================================
 // ADMIN - ALL FOOD
 // ==================================================
@@ -3596,7 +3800,6 @@ app.get(
         }
     }
 );
-
 
 // ==================================================
 // ADMIN STATS
@@ -3751,19 +3954,21 @@ app.get(
     }
 );
 
-
 // ==================================================
 // HEALTH CHECK
 // ==================================================
 
-app.get("/api/health", (req, res) => {
-    res.status(200).json({
-        success: true,
-        server: "running",
-        time: new Date().toISOString()
-    });
-});
-
+app.get(
+    "/api/health",
+    (req, res) => {
+        res.status(200).json({
+            success: true,
+            server: "running",
+            time:
+                new Date().toISOString()
+        });
+    }
+);
 
 // ==================================================
 // 404 HANDLER
@@ -3779,7 +3984,6 @@ app.use(
         });
     }
 );
-
 
 // ==================================================
 // ERROR HANDLER
@@ -3800,7 +4004,6 @@ app.use(
         });
     }
 );
-
 
 // ==================================================
 // START SERVER
