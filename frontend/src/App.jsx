@@ -195,23 +195,398 @@ function useCurrentLocation() {
 // ==================================================
 // DISTANCE + TRAVEL TIME
 // CURRENT GPS -> FOOD LOCATION
+// BACKEND ROUTE + FALLBACK GEOCODING/OSRM
 // ==================================================
+
+// --------------------------------------------------
+// LOCATION ALIASES
+// --------------------------------------------------
+
+const LOCATION_ALIASES = {
+  vizag: "Visakhapatnam, Andhra Pradesh, India",
+  visakhapatnam: "Visakhapatnam, Andhra Pradesh, India",
+
+  tuni: "Tuni, Andhra Pradesh, India",
+
+  tirupati: "Tirupati, Andhra Pradesh, India",
+
+  rajahmundry:
+    "Rajahmundry, Andhra Pradesh, India",
+
+  kadapa: "Kadapa, Andhra Pradesh, India",
+
+  mandapeta:
+    "Mandapeta, Andhra Pradesh, India",
+
+  vijayawada:
+    "Vijayawada, Andhra Pradesh, India",
+
+  chennai:
+    "Chennai, Tamil Nadu, India",
+
+  hyderabad:
+    "Hyderabad, Telangana, India",
+
+  bangalore:
+    "Bengaluru, Karnataka, India",
+
+  bengaluru:
+    "Bengaluru, Karnataka, India",
+
+  nellore:
+    "Nellore, Andhra Pradesh, India",
+
+  guntur:
+    "Guntur, Andhra Pradesh, India",
+
+  kakinada:
+    "Kakinada, Andhra Pradesh, India",
+
+  anantapur:
+    "Anantapur, Andhra Pradesh, India",
+
+  anakapalle:
+    "Anakapalle, Andhra Pradesh, India",
+
+  srikakulam:
+    "Srikakulam, Andhra Pradesh, India",
+
+  ongole:
+    "Ongole, Andhra Pradesh, India",
+
+  eluru:
+    "Eluru, Andhra Pradesh, India",
+
+  machilipatnam:
+    "Machilipatnam, Andhra Pradesh, India",
+};
+
+// --------------------------------------------------
+// GEOCODING CACHE
+// --------------------------------------------------
+
+const foodLocationCache = new Map();
+
+// --------------------------------------------------
+// GEOCODE FOOD LOCATION - SMART FALLBACK
+// --------------------------------------------------
+
+const geocodeFoodLocation = async (location) => {
+  if (!location || !location.trim()) {
+    throw new Error("Food location is not available.");
+  }
+
+  const originalLocation = location.trim();
+
+  const cacheKey = originalLocation.toLowerCase();
+
+  // ----------------------------------------------
+  // CACHE
+  // ----------------------------------------------
+
+  if (foodLocationCache.has(cacheKey)) {
+    return foodLocationCache.get(cacheKey);
+  }
+
+  // ----------------------------------------------
+  // BUILD MULTIPLE SEARCH QUERIES
+  // ----------------------------------------------
+
+  const searchQueries = [];
+
+  // 1. Exact alias
+  if (LOCATION_ALIASES[cacheKey]) {
+    searchQueries.push(
+      LOCATION_ALIASES[cacheKey]
+    );
+  }
+
+  // 2. Exact location
+  searchQueries.push(
+    `${originalLocation}, India`
+  );
+
+  // ----------------------------------------------
+  // SPECIAL CASE:
+  // MOHAN BABU UNIVERSITY / RANGAMPETA
+  // ----------------------------------------------
+
+  const lowerLocation =
+    originalLocation.toLowerCase();
+
+  if (
+    lowerLocation.includes("mohan babu") ||
+    lowerLocation.includes("rangampeta") ||
+    lowerLocation.includes("rangampet")
+  ) {
+    searchQueries.push(
+      "Mohan Babu University, Sree Sainath Nagar, Tirupati, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Sree Sainath Nagar, A Rangampet, Tirupati, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Rangampeta, Tirupati, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Tirupati, Andhra Pradesh, India"
+    );
+  }
+
+  // ----------------------------------------------
+  // GENERIC CITY FALLBACKS
+  // ----------------------------------------------
+
+  if (
+    lowerLocation.includes("tirupati")
+  ) {
+    searchQueries.push(
+      "Tirupati, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("rajahmundry")
+  ) {
+    searchQueries.push(
+      "Rajahmundry, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("vizag") ||
+    lowerLocation.includes("visakhapatnam")
+  ) {
+    searchQueries.push(
+      "Visakhapatnam, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("vijayawada")
+  ) {
+    searchQueries.push(
+      "Vijayawada, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("tuni")
+  ) {
+    searchQueries.push(
+      "Tuni, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("kadapa")
+  ) {
+    searchQueries.push(
+      "Kadapa, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("mandapeta")
+  ) {
+    searchQueries.push(
+      "Mandapeta, Andhra Pradesh, India"
+    );
+  }
+
+  // ----------------------------------------------
+  // REMOVE DUPLICATES
+  // ----------------------------------------------
+
+  const uniqueQueries = [
+    ...new Set(searchQueries)
+  ];
+
+  // ----------------------------------------------
+  // TRY EACH QUERY
+  // ----------------------------------------------
+
+  for (const query of uniqueQueries) {
+    try {
+      console.log(
+        "Trying geocoding query:",
+        query
+      );
+
+      const response = await axios.get(
+        "https://nominatim.openstreetmap.org/search",
+        {
+          params: {
+            q: query,
+            format: "json",
+            limit: 1,
+            addressdetails: 1,
+          },
+
+          headers: {
+            Accept: "application/json",
+            "Accept-Language": "en",
+          },
+
+          timeout: 15000,
+        }
+      );
+
+      const results = response.data;
+
+      if (
+        Array.isArray(results) &&
+        results.length > 0
+      ) {
+        const coordinates = {
+          lat: Number(results[0].lat),
+          lon: Number(results[0].lon),
+        };
+
+        if (
+          Number.isFinite(coordinates.lat) &&
+          Number.isFinite(coordinates.lon)
+        ) {
+          console.log(
+            "Location found:",
+            query,
+            coordinates
+          );
+
+          foodLocationCache.set(
+            cacheKey,
+            coordinates
+          );
+
+          return coordinates;
+        }
+      }
+    } catch (error) {
+      console.log(
+        "Geocoding query failed:",
+        query,
+        error.message
+      );
+    }
+  }
+
+  // ----------------------------------------------
+  // NOTHING FOUND
+  // ----------------------------------------------
+
+  throw new Error(
+    `Could not find location: ${originalLocation}`
+  );
+};
+// --------------------------------------------------
+// OSRM ROAD ROUTE FALLBACK
+// --------------------------------------------------
+
+const calculateOSRMRoute = async (
+  userCoords,
+  destinationCoords
+) => {
+  const url =
+    `https://router.project-osrm.org/route/v1/driving/` +
+    `${userCoords.lon},${userCoords.lat};` +
+    `${destinationCoords.lon},${destinationCoords.lat}`;
+
+  const response =
+    await axios.get(
+      url,
+      {
+        params: {
+          overview: "false",
+          steps: false,
+        },
+        timeout: 30000,
+      }
+    );
+
+  if (
+    response.data?.code !==
+      "Ok" ||
+    !response.data?.routes?.length
+  ) {
+    throw new Error(
+      "Road route could not be calculated."
+    );
+  }
+
+  const route =
+    response.data.routes[0];
+
+  const distanceKm =
+    Number(route.distance) /
+    1000;
+
+  const totalMinutes =
+    Math.round(
+      Number(route.duration) /
+        60
+    );
+
+  let travelTime = "";
+
+  if (totalMinutes < 60) {
+    travelTime =
+      `${totalMinutes} min`;
+  } else {
+    const hours =
+      Math.floor(
+        totalMinutes / 60
+      );
+
+    const minutes =
+      totalMinutes % 60;
+
+    if (minutes === 0) {
+      travelTime =
+        `${hours} hr`;
+    } else {
+      travelTime =
+        `${hours} hr ${minutes} min`;
+    }
+  }
+
+  return {
+    distanceKm,
+    travelTime,
+  };
+};
+
+// --------------------------------------------------
+// DISTANCE INFO COMPONENT
+// --------------------------------------------------
 
 function DistanceInfo({
   foodId,
   location,
   userCoords,
 }) {
-  const [info, setInfo] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [info, setInfo] =
+    useState(null);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [errorMessage, setErrorMessage] =
+    useState("");
 
   useEffect(() => {
     let cancelled = false;
 
     const calculateRoute = async () => {
-      if (!userCoords || !foodId || !location?.trim()) {
+      if (
+        !userCoords ||
+        !foodId ||
+        !location?.trim()
+      ) {
         setInfo(null);
+        setErrorMessage("");
         return;
       }
 
@@ -219,46 +594,137 @@ function DistanceInfo({
       setInfo(null);
       setErrorMessage("");
 
+      // ==================================================
+      // STEP 1
+      // TRY EXISTING BACKEND ROUTE
+      // ==================================================
+
       try {
-        const response = await axios.get(
-          `${API}/food/${foodId}/route`,
-          {
-            params: {
-              latitude: userCoords.lat,
-              longitude: userCoords.lon,
-            },
-            timeout: 30000,
-          }
+        console.log(
+          "Trying FoodSurplus backend route:",
+          location
         );
 
-        if (
-          !response.data?.success ||
-          !response.data?.route
-        ) {
-          throw new Error(
-            response.data?.message ||
-              "Unable to calculate road route."
+        const response =
+          await axios.get(
+            `${API}/food/${foodId}/route`,
+            {
+              params: {
+                latitude:
+                  userCoords.lat,
+
+                longitude:
+                  userCoords.lon,
+              },
+
+              timeout: 12000,
+            }
           );
+
+        if (
+          response.data?.success &&
+          response.data?.route
+        ) {
+          const route =
+            response.data.route;
+
+          if (
+            Number.isFinite(
+              Number(
+                route.distanceKm
+              )
+            )
+          ) {
+            if (!cancelled) {
+              setInfo({
+                distance:
+                  `${Number(
+                    route.distanceKm
+                  ).toFixed(2)} km`,
+
+                time:
+                  route.travelTime ||
+                  "Travel time unavailable",
+
+                destination:
+                  response.data
+                    .foodLocation ||
+                  location,
+              });
+            }
+
+            return;
+          }
         }
 
-        const route = response.data.route;
+        throw new Error(
+          response.data?.message ||
+            "Backend route unavailable."
+        );
+      } catch (backendError) {
+        console.log(
+          "Backend route failed. Using fallback:",
+          backendError.message
+        );
+      }
+
+      // ==================================================
+      // STEP 2
+      // FALLBACK: NOMINATIM + OSRM
+      // ==================================================
+
+      try {
+        if (!cancelled) {
+          setLoading(true);
+        }
+
+        console.log(
+          "Geocoding food location:",
+          location
+        );
+
+        const destinationCoords =
+          await geocodeFoodLocation(
+            location
+          );
+
+        console.log(
+          "Food coordinates:",
+          destinationCoords
+        );
+
+        const route =
+          await calculateOSRMRoute(
+            userCoords,
+            destinationCoords
+          );
 
         if (!cancelled) {
           setInfo({
-            distance: `${Number(route.distanceKm).toFixed(2)} km`,
-            time: route.travelTime || "Travel time unavailable",
+            distance:
+              `${Number(
+                route.distanceKm
+              ).toFixed(2)} km`,
+
+            time:
+              route.travelTime,
+
             destination:
-              response.data.foodLocation || location,
+              location,
           });
+
+          setErrorMessage("");
         }
-      } catch (error) {
-        console.log("Distance calculation error:", error);
+      } catch (fallbackError) {
+        console.log(
+          "Fallback route calculation failed:",
+          fallbackError
+        );
 
         if (!cancelled) {
           setErrorMessage(
-            error.response?.data?.message ||
-              error.message ||
-              "Unable to calculate road distance."
+            fallbackError.message ||
+              "Failed to calculate food route."
           );
         }
       } finally {
@@ -280,39 +746,112 @@ function DistanceInfo({
     userCoords?.lon,
   ]);
 
+  // ==================================================
+  // NO CURRENT LOCATION
+  // ==================================================
+
   if (!userCoords) {
     return (
-      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
-        📍 Getting your current location...
+      <div
+        style={{
+          marginTop: "10px",
+          padding: "10px",
+          borderRadius: "10px",
+          background:
+            "rgba(255,255,255,0.12)",
+        }}
+      >
+        📍 Getting your current
+        location...
       </div>
     );
   }
+
+  // ==================================================
+  // LOADING
+  // ==================================================
 
   if (loading) {
     return (
-      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
-        🔄 Calculating road distance and travel time...
+      <div
+        style={{
+          marginTop: "10px",
+          padding: "10px",
+          borderRadius: "10px",
+          background:
+            "rgba(255,255,255,0.12)",
+        }}
+      >
+        🔄 Calculating road
+        distance and travel time...
       </div>
     );
   }
 
+  // ==================================================
+  // ERROR
+  // ==================================================
+
   if (errorMessage) {
     return (
-      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
+      <div
+        style={{
+          marginTop: "10px",
+          padding: "10px",
+          borderRadius: "10px",
+          background:
+            "rgba(255,255,255,0.12)",
+        }}
+      >
         ⚠️ {errorMessage}
       </div>
     );
   }
 
-  if (!info) return null;
+  // ==================================================
+  // NO INFO
+  // ==================================================
+
+  if (!info) {
+    return null;
+  }
+
+  // ==================================================
+  // SUCCESS
+  // ==================================================
 
   return (
-    <div style={{ marginTop: "10px", padding: "12px", borderRadius: "10px", background: "rgba(255,255,255,0.15)", lineHeight: "1.8" }}>
-      📏 <strong>Road Distance:</strong> {info.distance}
+    <div
+      style={{
+        marginTop: "10px",
+        padding: "12px",
+        borderRadius: "10px",
+        background:
+          "rgba(255,255,255,0.15)",
+        lineHeight: "1.8",
+      }}
+    >
+      📏{" "}
+      <strong>
+        Road Distance:
+      </strong>{" "}
+      {info.distance}
+
       <br />
-      🚗 <strong>Estimated Travel Time:</strong> {info.time}
+
+      🚗{" "}
+      <strong>
+        Estimated Travel Time:
+      </strong>{" "}
+      {info.time}
+
       <br />
-      📍 <strong>Route Location:</strong> {info.destination}
+
+      📍{" "}
+      <strong>
+        Route Location:
+      </strong>{" "}
+      {info.destination}
     </div>
   );
 }
