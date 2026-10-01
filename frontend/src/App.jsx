@@ -55,88 +55,23 @@ function useBackendWarmup() {
 }
 
 // ==================================================
-// GOOGLE MAPS ROUTE
-// CURRENT LOCATION -> FOOD LOCATION
+// DISTANCE + TRAVEL TIME
+// CURRENT GPS -> FOOD LOCATION
+// BACKEND ROUTE + FALLBACK GEOCODING/OSRM
 // ==================================================
 
-function ViewLocation({
-  location,
-  userCoords,
-}) {
-  const [opening, setOpening] =
-    useState(false);
-
-  const openRoute = () => {
-    if (!location || !location.trim()) {
-      alert("Food location is not available.");
-      return;
-    }
-
-    setOpening(true);
-
-    const destination =
-      encodeURIComponent(location.trim());
-
-    let url = "";
-
-    if (userCoords) {
-      url =
-        "https://www.google.com/maps/dir/?api=1" +
-        `&origin=${userCoords.lat},${userCoords.lon}` +
-        `&destination=${destination}` +
-        "&travelmode=driving";
-    } else {
-      url =
-        "https://www.google.com/maps/search/?api=1&query=" +
-        destination;
-    }
-
-    window.open(url, "_blank");
-
-    setTimeout(() => {
-      setOpening(false);
-    }, 500);
-  };
-
-  return (
-    <div style={{ marginTop: "10px" }}>
-      <button
-        type="button"
-        className="primary-btn"
-        onClick={openRoute}
-        style={{
-          width: "100%",
-        }}
-        disabled={opening}
-      >
-        {opening
-          ? "🔄 Opening Maps..."
-          : userCoords
-          ? "📍 View Route from My Location"
-          : "📍 Open Food Location"}
-      </button>
-    </div>
-  );
-}
-
-// ==================================================
-// CURRENT USER LOCATION
-// ==================================================
-
+// --------------------------------------------------
 function useCurrentLocation() {
-  const [userCoords, setUserCoords] =
-    useState(null);
+  const [userCoords, setUserCoords] = useState(null);
+  const [locationError, setLocationError] = useState("");
 
-  const [locationError, setLocationError] =
-    useState("");
-
-  const getLocation = useCallback(() => {
+  const getCurrentLocation = useCallback(() => {
     if (!navigator.geolocation) {
-      setLocationError(
-        "Geolocation is not supported by this browser."
-      );
+      setLocationError("Geolocation is not supported by this browser.");
       return;
     }
+
+    setLocationError("");
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -144,76 +79,54 @@ function useCurrentLocation() {
           lat: position.coords.latitude,
           lon: position.coords.longitude,
         });
-
-        setLocationError("");
       },
       (error) => {
-        console.log(
-          "Location permission error:",
-          error
-        );
-
-        let message =
-          "Please allow location access to calculate distance and travel time.";
-
-        if (error.code === 1) {
-          message =
-            "Location permission denied. Please allow location access in browser settings.";
-        }
-
-        if (error.code === 2) {
-          message =
-            "Your current location could not be detected. Please check your device location.";
-        }
-
-        if (error.code === 3) {
-          message =
-            "Location request timed out. Please try again.";
-        }
-
-        setLocationError(message);
+        console.log("Current location error:", error.message);
+        setLocationError("Unable to get your current location. Please allow location access.");
       },
       {
         enableHighAccuracy: true,
-        timeout: 20000,
+        timeout: 15000,
         maximumAge: 60000,
       }
     );
   }, []);
 
   useEffect(() => {
-    getLocation();
-  }, [getLocation]);
+    getCurrentLocation();
+  }, [getCurrentLocation]);
 
   return {
     userCoords,
     locationError,
-    refreshLocation: getLocation,
+    refreshLocation: getCurrentLocation,
   };
 }
-
-// ==================================================
-// DISTANCE + TRAVEL TIME
-// CURRENT GPS -> FOOD LOCATION
-// BACKEND ROUTE + FALLBACK GEOCODING/OSRM
-// ==================================================
-
-// --------------------------------------------------
 // LOCATION ALIASES
 // --------------------------------------------------
 
 const LOCATION_ALIASES = {
-  vizag: "Visakhapatnam, Andhra Pradesh, India",
-  visakhapatnam: "Visakhapatnam, Andhra Pradesh, India",
+  // Andhra Pradesh
+  vizag:
+    "Visakhapatnam, Andhra Pradesh, India",
 
-  tuni: "Tuni, Andhra Pradesh, India",
+  visakhapatnam:
+    "Visakhapatnam, Andhra Pradesh, India",
 
-  tirupati: "Tirupati, Andhra Pradesh, India",
+  tuni:
+    "Tuni, Andhra Pradesh, India",
+
+  annavaram:
+    "Annavaram, Andhra Pradesh, India",
+
+  tirupati:
+    "Tirupati, Andhra Pradesh, India",
 
   rajahmundry:
     "Rajahmundry, Andhra Pradesh, India",
 
-  kadapa: "Kadapa, Andhra Pradesh, India",
+  kadapa:
+    "Kadapa, Andhra Pradesh, India",
 
   mandapeta:
     "Mandapeta, Andhra Pradesh, India",
@@ -221,26 +134,14 @@ const LOCATION_ALIASES = {
   vijayawada:
     "Vijayawada, Andhra Pradesh, India",
 
-  chennai:
-    "Chennai, Tamil Nadu, India",
-
-  hyderabad:
-    "Hyderabad, Telangana, India",
-
-  bangalore:
-    "Bengaluru, Karnataka, India",
-
-  bengaluru:
-    "Bengaluru, Karnataka, India",
-
-  nellore:
-    "Nellore, Andhra Pradesh, India",
-
   guntur:
     "Guntur, Andhra Pradesh, India",
 
   kakinada:
     "Kakinada, Andhra Pradesh, India",
+
+  nellore:
+    "Nellore, Andhra Pradesh, India",
 
   anantapur:
     "Anantapur, Andhra Pradesh, India",
@@ -259,6 +160,25 @@ const LOCATION_ALIASES = {
 
   machilipatnam:
     "Machilipatnam, Andhra Pradesh, India",
+
+  // Telangana
+  hyderabad:
+    "Hyderabad, Telangana, India",
+
+  // Tamil Nadu
+  chennai:
+    "Chennai, Tamil Nadu, India",
+
+  // Karnataka
+  bangalore:
+    "Bengaluru, Karnataka, India",
+
+  bengaluru:
+    "Bengaluru, Karnataka, India",
+
+  // Maharashtra
+  mumbai:
+    "Mumbai, Maharashtra, India",
 };
 
 // --------------------------------------------------
@@ -268,59 +188,251 @@ const LOCATION_ALIASES = {
 const foodLocationCache = new Map();
 
 // --------------------------------------------------
-// GEOCODE FOOD LOCATION - SMART FALLBACK
+// GEOCODE FOOD LOCATION
+// SMART MULTI-FALLBACK VERSION
 // --------------------------------------------------
 
-const geocodeFoodLocation = async (location) => {
+const geocodeFoodLocation = async (
+  location
+) => {
   if (!location || !location.trim()) {
-    throw new Error("Food location is not available.");
-  }
-
-  const originalLocation = location.trim();
-
-  const cacheKey = originalLocation.toLowerCase();
-
-  // ----------------------------------------------
-  // CACHE
-  // ----------------------------------------------
-
-  if (foodLocationCache.has(cacheKey)) {
-    return foodLocationCache.get(cacheKey);
-  }
-
-  // ----------------------------------------------
-  // BUILD MULTIPLE SEARCH QUERIES
-  // ----------------------------------------------
-
-  const searchQueries = [];
-
-  // 1. Exact alias
-  if (LOCATION_ALIASES[cacheKey]) {
-    searchQueries.push(
-      LOCATION_ALIASES[cacheKey]
+    throw new Error(
+      "Food location is not available."
     );
   }
 
-  // 2. Exact location
+  const originalLocation =
+    location.trim();
+
+  const cacheKey =
+    originalLocation.toLowerCase();
+
+  // ------------------------------------------------
+  // CACHE
+  // ------------------------------------------------
+
+  if (
+    foodLocationCache.has(cacheKey)
+  ) {
+    return foodLocationCache.get(
+      cacheKey
+    );
+  }
+
+  // ------------------------------------------------
+  // BUILD SEARCH QUERIES
+  // ------------------------------------------------
+
+  const searchQueries = [];
+
+  const normalizedLocation =
+    cacheKey
+      .replace(/\s+/g, " ")
+      .trim();
+
+  // 1. Exact alias
+  if (
+    LOCATION_ALIASES[
+      normalizedLocation
+    ]
+  ) {
+    searchQueries.push(
+      LOCATION_ALIASES[
+        normalizedLocation
+      ]
+    );
+  }
+
+  // 2. Exact user location
   searchQueries.push(
     `${originalLocation}, India`
   );
 
-  // ----------------------------------------------
-  // SPECIAL CASE:
-  // MOHAN BABU UNIVERSITY / RANGAMPETA
-  // ----------------------------------------------
+  // 3. Exact user location without India
+  searchQueries.push(
+    originalLocation
+  );
 
-  const lowerLocation =
-    originalLocation.toLowerCase();
+  // ------------------------------------------------
+  // SPECIAL LOCATION FALLBACKS
+  // ------------------------------------------------
 
   if (
-    lowerLocation.includes("mohan babu") ||
-    lowerLocation.includes("rangampeta") ||
-    lowerLocation.includes("rangampet")
+    normalizedLocation.includes(
+      "annavaram"
+    )
   ) {
     searchQueries.push(
-      "Mohan Babu University, Sree Sainath Nagar, Tirupati, Andhra Pradesh, India"
+      "Annavaram, East Godavari, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Annavaram, Kakinada district, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Annavaram temple, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "mumbai"
+    )
+  ) {
+    searchQueries.push(
+      "Mumbai, Maharashtra, India"
+    );
+
+    searchQueries.push(
+      "Mumbai, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "chennai"
+    )
+  ) {
+    searchQueries.push(
+      "Chennai, Tamil Nadu, India"
+    );
+
+    searchQueries.push(
+      "Chennai, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "vizag"
+    ) ||
+    normalizedLocation.includes(
+      "visakhapatnam"
+    )
+  ) {
+    searchQueries.push(
+      "Visakhapatnam, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Visakhapatnam, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "kadapa"
+    )
+  ) {
+    searchQueries.push(
+      "Kadapa, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "YSR Kadapa district, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "mandapeta"
+    )
+  ) {
+    searchQueries.push(
+      "Mandapeta, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Mandapeta, East Godavari, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Mandapeta, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "tuni"
+    )
+  ) {
+    searchQueries.push(
+      "Tuni, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Tuni, Kakinada district, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Tuni, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "tirupati"
+    )
+  ) {
+    searchQueries.push(
+      "Tirupati, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Tirupati, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "rajahmundry"
+    )
+  ) {
+    searchQueries.push(
+      "Rajahmundry, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Rajamahendravaram, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Rajahmundry, India"
+    );
+  }
+
+  if (
+    normalizedLocation.includes(
+      "vijayawada"
+    )
+  ) {
+    searchQueries.push(
+      "Vijayawada, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Vijayawada, India"
+    );
+  }
+
+  // ------------------------------------------------
+  // MOHAN BABU UNIVERSITY / RANGAMPETA
+  // ------------------------------------------------
+
+  if (
+    normalizedLocation.includes(
+      "mohan babu"
+    ) ||
+    normalizedLocation.includes(
+      "rangampeta"
+    ) ||
+    normalizedLocation.includes(
+      "rangampet"
+    )
+  ) {
+    searchQueries.push(
+      "Mohan Babu University, Tirupati, Andhra Pradesh, India"
     );
 
     searchQueries.push(
@@ -336,155 +448,135 @@ const geocodeFoodLocation = async (location) => {
     );
   }
 
-  // ----------------------------------------------
-  // GENERIC CITY FALLBACKS
-  // ----------------------------------------------
-
-  if (
-    lowerLocation.includes("tirupati")
-  ) {
-    searchQueries.push(
-      "Tirupati, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    lowerLocation.includes("rajahmundry")
-  ) {
-    searchQueries.push(
-      "Rajahmundry, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    lowerLocation.includes("vizag") ||
-    lowerLocation.includes("visakhapatnam")
-  ) {
-    searchQueries.push(
-      "Visakhapatnam, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    lowerLocation.includes("vijayawada")
-  ) {
-    searchQueries.push(
-      "Vijayawada, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    lowerLocation.includes("tuni")
-  ) {
-    searchQueries.push(
-      "Tuni, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    lowerLocation.includes("kadapa")
-  ) {
-    searchQueries.push(
-      "Kadapa, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    lowerLocation.includes("mandapeta")
-  ) {
-    searchQueries.push(
-      "Mandapeta, Andhra Pradesh, India"
-    );
-  }
-
-  // ----------------------------------------------
+  // ------------------------------------------------
   // REMOVE DUPLICATES
-  // ----------------------------------------------
+  // ------------------------------------------------
 
   const uniqueQueries = [
-    ...new Set(searchQueries)
+    ...new Set(
+      searchQueries.filter(
+        Boolean
+      )
+    ),
   ];
 
-  // ----------------------------------------------
-  // TRY EACH QUERY
-  // ----------------------------------------------
+  console.log(
+    "Geocoding location:",
+    originalLocation
+  );
 
-  for (const query of uniqueQueries) {
+  console.log(
+    "Search queries:",
+    uniqueQueries
+  );
+
+  // ------------------------------------------------
+  // TRY EVERY QUERY
+  // ------------------------------------------------
+
+  for (
+    const query of uniqueQueries
+  ) {
     try {
       console.log(
-        "Trying geocoding query:",
+        "Trying:",
         query
       );
 
-      const response = await axios.get(
-        "https://nominatim.openstreetmap.org/search",
-        {
-          params: {
-            q: query,
-            format: "json",
-            limit: 1,
-            addressdetails: 1,
-          },
+      const response =
+        await axios.get(
+          "https://nominatim.openstreetmap.org/search",
+          {
+            params: {
+              q: query,
+              format: "json",
+              limit: 3,
+              addressdetails: 1,
+              countrycodes: "in",
+            },
 
-          headers: {
-            Accept: "application/json",
-            "Accept-Language": "en",
-          },
+            headers: {
+              Accept:
+                "application/json",
 
-          timeout: 15000,
-        }
-      );
+              "Accept-Language":
+                "en-US,en",
+            },
 
-      const results = response.data;
+            timeout: 15000,
+          }
+        );
+
+      const results =
+        response.data;
 
       if (
         Array.isArray(results) &&
         results.length > 0
       ) {
-        const coordinates = {
-          lat: Number(results[0].lat),
-          lon: Number(results[0].lon),
-        };
+        // ------------------------------------------
+        // FIND FIRST VALID COORDINATES
+        // ------------------------------------------
 
-        if (
-          Number.isFinite(coordinates.lat) &&
-          Number.isFinite(coordinates.lon)
+        for (
+          const result of results
         ) {
-          console.log(
-            "Location found:",
-            query,
-            coordinates
-          );
+          const lat =
+            Number(result.lat);
 
-          foodLocationCache.set(
-            cacheKey,
-            coordinates
-          );
+          const lon =
+            Number(result.lon);
 
-          return coordinates;
+          if (
+            Number.isFinite(lat) &&
+            Number.isFinite(lon)
+          ) {
+            const coordinates = {
+              lat,
+              lon,
+            };
+
+            console.log(
+              "Location found:",
+              query,
+              coordinates
+            );
+
+            foodLocationCache.set(
+              cacheKey,
+              coordinates
+            );
+
+            return coordinates;
+          }
         }
       }
+
+      console.log(
+        "No valid result:",
+        query
+      );
     } catch (error) {
       console.log(
-        "Geocoding query failed:",
+        "Geocoding failed:",
         query,
         error.message
       );
     }
   }
 
-  // ----------------------------------------------
+  // ------------------------------------------------
   // NOTHING FOUND
-  // ----------------------------------------------
+  // ------------------------------------------------
 
   throw new Error(
     `Could not find location: ${originalLocation}`
   );
 };
+
 // --------------------------------------------------
 // OSRM ROAD ROUTE FALLBACK
 // --------------------------------------------------
-
 const calculateOSRMRoute = async (
   userCoords,
   destinationCoords
@@ -567,14 +659,11 @@ function DistanceInfo({
   location,
   userCoords,
 }) {
-  const [info, setInfo] =
-    useState(null);
+  const [info, setInfo] = useState(null);
 
-  const [loading, setLoading] =
-    useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const [errorMessage, setErrorMessage] =
-    useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -595,8 +684,7 @@ function DistanceInfo({
       setErrorMessage("");
 
       // ==================================================
-      // STEP 1
-      // TRY EXISTING BACKEND ROUTE
+      // STEP 1 - EXISTING BACKEND ROUTE
       // ==================================================
 
       try {
@@ -605,34 +693,26 @@ function DistanceInfo({
           location
         );
 
-        const response =
-          await axios.get(
-            `${API}/food/${foodId}/route`,
-            {
-              params: {
-                latitude:
-                  userCoords.lat,
-
-                longitude:
-                  userCoords.lon,
-              },
-
-              timeout: 12000,
-            }
-          );
+        const response = await axios.get(
+          `${API}/food/${foodId}/route`,
+          {
+            params: {
+              latitude: userCoords.lat,
+              longitude: userCoords.lon,
+            },
+            timeout: 12000,
+          }
+        );
 
         if (
           response.data?.success &&
           response.data?.route
         ) {
-          const route =
-            response.data.route;
+          const route = response.data.route;
 
           if (
             Number.isFinite(
-              Number(
-                route.distanceKm
-              )
+              Number(route.distanceKm)
             )
           ) {
             if (!cancelled) {
@@ -647,8 +727,7 @@ function DistanceInfo({
                   "Travel time unavailable",
 
                 destination:
-                  response.data
-                    .foodLocation ||
+                  response.data.foodLocation ||
                   location,
               });
             }
@@ -669,24 +748,17 @@ function DistanceInfo({
       }
 
       // ==================================================
-      // STEP 2
-      // FALLBACK: NOMINATIM + OSRM
+      // STEP 2 - NOMINATIM + OSRM FALLBACK
       // ==================================================
 
       try {
-        if (!cancelled) {
-          setLoading(true);
-        }
-
         console.log(
           "Geocoding food location:",
           location
         );
 
         const destinationCoords =
-          await geocodeFoodLocation(
-            location
-          );
+          await geocodeFoodLocation(location);
 
         console.log(
           "Food coordinates:",
@@ -706,11 +778,9 @@ function DistanceInfo({
                 route.distanceKm
               ).toFixed(2)} km`,
 
-            time:
-              route.travelTime,
+            time: route.travelTime,
 
-            destination:
-              location,
+            destination: location,
           });
 
           setErrorMessage("");
@@ -761,8 +831,7 @@ function DistanceInfo({
             "rgba(255,255,255,0.12)",
         }}
       >
-        📍 Getting your current
-        location...
+        ?? Getting your current location...
       </div>
     );
   }
@@ -782,8 +851,8 @@ function DistanceInfo({
             "rgba(255,255,255,0.12)",
         }}
       >
-        🔄 Calculating road
-        distance and travel time...
+        ?? Calculating road distance and travel
+        time...
       </div>
     );
   }
@@ -803,7 +872,7 @@ function DistanceInfo({
             "rgba(255,255,255,0.12)",
         }}
       >
-        ⚠️ {errorMessage}
+        ?? {errorMessage}
       </div>
     );
   }
@@ -831,7 +900,7 @@ function DistanceInfo({
         lineHeight: "1.8",
       }}
     >
-      📏{" "}
+      ??{" "}
       <strong>
         Road Distance:
       </strong>{" "}
@@ -839,7 +908,7 @@ function DistanceInfo({
 
       <br />
 
-      🚗{" "}
+      ??{" "}
       <strong>
         Estimated Travel Time:
       </strong>{" "}
@@ -847,7 +916,7 @@ function DistanceInfo({
 
       <br />
 
-      📍{" "}
+      ??{" "}
       <strong>
         Route Location:
       </strong>{" "}
@@ -1048,19 +1117,19 @@ function Notifications({
   ) => {
     switch (type) {
       case "claim":
-        return "🤝";
+        return "CLAIM";
 
       case "pickup":
-        return "📦";
+        return "PICKUP";
 
       case "cancel":
-        return "❌";
+        return "CANCEL";
 
       case "distribution":
-        return "✅";
+        return "DISTRIBUTED";
 
       default:
-        return "🔔";
+        return "NOTICE";
     }
   };
 
@@ -1115,7 +1184,7 @@ function Notifications({
             margin: 0,
           }}
         >
-          🔔 Notifications
+          Notifications
         </h2>
 
         <button
@@ -1129,9 +1198,7 @@ function Notifications({
             padding: "7px 10px",
             cursor: "pointer",
           }}
-        >
-          ✕
-        </button>
+        > Close </button>
       </div>
 
       <div
@@ -1155,18 +1222,18 @@ function Notifications({
             className="secondary-btn"
             onClick={markAllRead}
           >
-            ✓ Mark all as read
+            ? Mark all as read
           </button>
         )}
       </div>
 
       {loading ? (
         <div className="message">
-          🔄 Loading notifications...
+          ?? Loading notifications...
         </div>
       ) : error ? (
         <div className="message">
-          ⚠️ {error}
+          ?? {error}
         </div>
       ) : notifications.length ===
         0 ? (
@@ -1183,7 +1250,7 @@ function Notifications({
               marginBottom: "10px",
             }}
           >
-            🔕
+            ??
           </div>
 
           <p>
@@ -1290,7 +1357,7 @@ function Notifications({
                           )
                         }
                       >
-                        ✓ Read
+                        ? Read
                       </button>
                     )}
 
@@ -1302,7 +1369,7 @@ function Notifications({
                         )
                       }
                     >
-                      🗑 Delete
+                      ?? Delete
                     </button>
                   </div>
                 </div>
@@ -1442,7 +1509,7 @@ function Login({
             disabled={loading}
           >
             {loading
-              ? "🔄 Logging in..."
+              ? "Logging in..."
               : "Login"}
           </button>
         </form>
@@ -1464,7 +1531,7 @@ function Login({
           onClick={goAdminLogin}
           disabled={loading}
         >
-          🔐 Admin Login
+          ?? Admin Login
         </button>
       </div>
     </div>
@@ -1547,7 +1614,7 @@ function AdminLogin({
     <div className="page-background login-bg">
       <div className="glass-card auth-card">
         <div className="hero-icon">
-          🔐
+          ??
         </div>
 
         <h1>
@@ -1599,7 +1666,7 @@ function AdminLogin({
             disabled={loading}
           >
             {loading
-              ? "🔄 Logging in..."
+              ? "Logging in..."
               : "Admin Login"}
           </button>
         </form>
@@ -1764,7 +1831,7 @@ function Register({
             disabled={loading}
           >
             {loading
-              ? "🔄 Creating..."
+              ? "Creating..."
               : "Create Account"}
           </button>
         </form>
@@ -1798,7 +1865,7 @@ function Home({
     <div className="home-page">
       <nav className="navbar">
         <div className="logo">
-          🍽️ FoodSurplus
+          ??? FoodSurplus
         </div>
 
         <div className="nav-buttons">
@@ -1818,7 +1885,7 @@ function Home({
             className="admin-nav-btn"
             onClick={goAdminLogin}
           >
-            🔐 Admin
+            ?? Admin
           </button>
         </div>
       </nav>
@@ -1828,7 +1895,7 @@ function Home({
 
         <div className="hero-content">
           <div className="hero-icon">
-            🍲
+            ??
           </div>
 
           <p className="tagline">
@@ -1901,13 +1968,52 @@ function UserDashboard({
   const [message, setMessage] =
     useState("");
 
-  const [showNotifications,
-    setShowNotifications] =
+  const [showNotifications, setShowNotifications] =
     useState(false);
 
-  const [notificationCount,
-    setNotificationCount] =
+  const [notificationCount, setNotificationCount] =
     useState(0);
+
+  // ==================================================
+  // PROFILE STATES
+  // ==================================================
+
+  const [showUserMenu, setShowUserMenu] =
+    useState(false);
+
+  const [showEditProfile, setShowEditProfile] =
+    useState(false);
+
+  const [showChangePassword, setShowChangePassword] =
+    useState(false);
+
+  const [profileUser, setProfileUser] =
+    useState(user);
+
+  const [profileForm, setProfileForm] =
+    useState({
+      name: user.name || "",
+      email: user.email || "",
+      phone: user.phone || "",
+      address: user.address || "",
+    });
+
+  const [passwordForm, setPasswordForm] =
+    useState({
+      newPassword: "",
+      confirmPassword: "",
+    });
+
+  const [profileMessage, setProfileMessage] =
+    useState("");
+
+  const [profileLoading, setProfileLoading] =
+    useState(false);
+
+  // ==================================================
+  // CURRENT LOCATION
+  // DO NOT CHANGE
+  // ==================================================
 
   const {
     userCoords,
@@ -1917,6 +2023,165 @@ function UserDashboard({
 
   const userId =
     user.id || user._id;
+
+  // ==================================================
+  // PROFILE INPUT
+  // ==================================================
+
+  const handleProfileChange = (e) => {
+    setProfileForm({
+      ...profileForm,
+      [e.target.name]: e.target.value,
+    });
+  };
+
+  // ==================================================
+  // UPDATE PROFILE
+  // ==================================================
+
+  const updateProfile = async (e) => {
+    e.preventDefault();
+
+    if (profileLoading) {
+      return;
+    }
+
+    setProfileMessage("");
+    setProfileLoading(true);
+
+    try {
+      const response =
+        await axios.put(
+          `${API}/users/${userId}`,
+          {
+            name: profileForm.name.trim(),
+            email: profileForm.email.trim(),
+            phone: profileForm.phone.trim(),
+            address: profileForm.address.trim(),
+          },
+          {
+            timeout: 15000,
+          }
+        );
+
+      if (!response.data?.success) {
+        throw new Error(
+          response.data?.message ||
+            "Failed to update profile"
+        );
+      }
+
+      const updatedUser =
+        response.data.user;
+
+      setProfileUser(updatedUser);
+
+      setProfileForm({
+        name: updatedUser.name || "",
+        email: updatedUser.email || "",
+        phone: updatedUser.phone || "",
+        address: updatedUser.address || "",
+      });
+
+      setProfileMessage(
+        "Profile updated successfully!"
+      );
+
+      setShowEditProfile(false);
+      setShowUserMenu(false);
+
+      setTimeout(() => {
+        setProfileMessage("");
+      }, 3000);
+    } catch (error) {
+      setProfileMessage(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to update profile"
+      );
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  // ==================================================
+  // CHANGE PASSWORD
+  // ==================================================
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+
+    if (profileLoading) {
+      return;
+    }
+
+    if (
+      passwordForm.newPassword.length < 6
+    ) {
+      setProfileMessage(
+        "Password must contain at least 6 characters."
+      );
+      return;
+    }
+
+    if (
+      passwordForm.newPassword !==
+      passwordForm.confirmPassword
+    ) {
+      setProfileMessage(
+        "New password and confirm password do not match."
+      );
+      return;
+    }
+
+    setProfileMessage("");
+    setProfileLoading(true);
+
+    try {
+      const response =
+        await axios.put(
+          `${API}/users/${userId}`,
+          {
+            password:
+              passwordForm.newPassword,
+          },
+          {
+            timeout: 15000,
+          }
+        );
+
+      if (!response.data?.success) {
+        throw new Error(
+          response.data?.message ||
+            "Failed to change password"
+        );
+      }
+
+      setPasswordForm({
+        newPassword: "",
+        confirmPassword: "",
+      });
+
+      setShowChangePassword(false);
+      setShowUserMenu(false);
+
+      setProfileMessage(
+        "Password changed successfully!"
+      );
+
+      setTimeout(() => {
+        setProfileMessage("");
+      }, 3000);
+    } catch (error) {
+      setProfileMessage(
+        error.response?.data?.message ||
+          error.message ||
+          "Failed to change password"
+      );
+    } finally {
+      setProfileLoading(false);
+    }
+  };
 
   // ==================================================
   // LOAD NOTIFICATION COUNT
@@ -1952,8 +2217,8 @@ function UserDashboard({
   // LOAD AVAILABLE FOOD
   // ==================================================
 
-  const loadFoods = useCallback(
-    async () => {
+  const loadFoods =
+    useCallback(async () => {
       try {
         const response =
           await axios.get(
@@ -1972,9 +2237,7 @@ function UserDashboard({
           error
         );
       }
-    },
-    []
-  );
+    }, []);
 
   // ==================================================
   // LOAD CLAIMED FOOD
@@ -2092,19 +2355,13 @@ function UserDashboard({
         `${API}/food`,
         {
           donorId: userId,
-          foodName:
-            food.foodName,
-          foodType:
-            food.foodType,
-          quantity:
-            Number(food.quantity),
+          foodName: food.foodName,
+          foodType: food.foodType,
+          quantity: Number(food.quantity),
           unit: food.unit,
-          description:
-            food.description,
-          location:
-            food.location,
-          expiryTime:
-            food.expiryTime,
+          description: food.description,
+          location: food.location,
+          expiryTime: food.expiryTime,
         },
         {
           timeout: 15000,
@@ -2132,8 +2389,7 @@ function UserDashboard({
       setTab("donations");
     } catch (error) {
       setMessage(
-        error.response?.data
-          ?.message ||
+        error.response?.data?.message ||
           "Failed to donate food"
       );
     }
@@ -2143,12 +2399,10 @@ function UserDashboard({
   // CLAIM FOOD
   // ==================================================
 
-  const claimFood = async (
-    foodId
-  ) => {
+  const claimFood = async (foodId) => {
     try {
       setMessage(
-        "🔄 Claiming food..."
+        "Claiming food..."
       );
 
       await axios.put(
@@ -2162,7 +2416,7 @@ function UserDashboard({
       );
 
       setMessage(
-        "✅ Food claimed successfully! Notification created."
+        "Food claimed successfully! Notification created."
       );
 
       await loadFoods();
@@ -2177,8 +2431,7 @@ function UserDashboard({
       }, 4000);
     } catch (error) {
       setMessage(
-        error.response?.data
-          ?.message ||
+        error.response?.data?.message ||
           "Failed to claim food"
       );
     }
@@ -2188,9 +2441,7 @@ function UserDashboard({
   // CANCEL FOOD
   // ==================================================
 
-  const cancelFood = async (
-    foodId
-  ) => {
+  const cancelFood = async (foodId) => {
     const confirmCancel =
       window.confirm(
         "Are you sure you want to cancel this food?"
@@ -2220,8 +2471,7 @@ function UserDashboard({
       await loadNotificationCount();
     } catch (error) {
       setMessage(
-        error.response?.data
-          ?.message ||
+        error.response?.data?.message ||
           "Failed to cancel food"
       );
     }
@@ -2253,8 +2503,7 @@ function UserDashboard({
         await loadNotificationCount();
       } catch (error) {
         setMessage(
-          error.response?.data
-            ?.message ||
+          error.response?.data?.message ||
             "Failed to distribute food"
         );
       }
@@ -2262,9 +2511,15 @@ function UserDashboard({
 
   return (
     <div className="dashboard-page donor-bg">
+
+      {/* ==================================================
+          NAVBAR
+      ================================================== */}
+
       <nav className="dashboard-nav">
+
         <div className="logo">
-          🍽️ FoodSurplus
+          ??? FoodSurplus
         </div>
 
         <div
@@ -2275,11 +2530,12 @@ function UserDashboard({
             flexWrap: "wrap",
           }}
         >
+
           <span className="role-badge">
             USER
           </span>
 
-          {/* NOTIFICATION BUTTON */}
+          {/* NOTIFICATIONS */}
 
           <button
             onClick={() =>
@@ -2293,10 +2549,9 @@ function UserDashboard({
               cursor: "pointer",
             }}
           >
-            🔔 Notifications
+            Notifications
 
-            {notificationCount >
-              0 && (
+            {notificationCount > 0 && (
               <span
                 style={{
                   position: "absolute",
@@ -2304,51 +2559,406 @@ function UserDashboard({
                   right: "-8px",
                   minWidth: "21px",
                   height: "21px",
-                  borderRadius:
-                    "50%",
-                  background:
-                    "#ef4444",
+                  borderRadius: "50%",
+                  background: "#ef4444",
                   color: "white",
                   fontSize: "11px",
                   display: "flex",
-                  alignItems:
-                    "center",
-                  justifyContent:
-                    "center",
-                  fontWeight:
-                    "bold",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: "bold",
                 }}
               >
-                {notificationCount >
-                99
+                {notificationCount > 99
                   ? "99+"
                   : notificationCount}
               </span>
             )}
           </button>
 
+          {/* ==================================================
+              USER PROFILE BUTTON
+          ================================================== */}
+
+          <div
+            style={{
+              position: "relative",
+            }}
+          >
+
+            <button
+              type="button"
+              onClick={() =>
+                setShowUserMenu(
+                  (previous) =>
+                    !previous
+                )
+              }
+              style={{
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ??{" "}
+              {profileUser.name ||
+                "USER"}{" "}
+              ?
+            </button>
+
+            {/* PROFILE DROPDOWN */}
+
+            {showUserMenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 8px)",
+                  right: 0,
+                  minWidth: "210px",
+                  padding: "10px",
+                  borderRadius: "14px",
+                  background:
+                    "rgba(20,20,30,0.98)",
+                  backdropFilter:
+                    "blur(15px)",
+                  boxShadow:
+                    "0 15px 35px rgba(0,0,0,0.35)",
+                  border:
+                    "1px solid rgba(255,255,255,0.15)",
+                  zIndex: 10000,
+                }}
+              >
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditProfile(true);
+                    setShowUserMenu(false);
+                    setProfileMessage("");
+                  }}
+                  style={{
+                    width: "100%",
+                    marginBottom: "8px",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  ?? Edit Profile
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChangePassword(true);
+                    setShowUserMenu(false);
+                    setProfileMessage("");
+                  }}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  ?? Change Password
+                </button>
+
+              </div>
+            )}
+
+          </div>
+
+          {/* LOGOUT */}
+
           <button
             onClick={logout}
           >
             Logout
           </button>
+
         </div>
       </nav>
 
-      {/* NOTIFICATION PANEL */}
+      {/* ==================================================
+          NOTIFICATION PANEL
+      ================================================== */}
 
       {showNotifications && (
         <Notifications
           userId={userId}
           onClose={() =>
-            setShowNotifications(
-              false
-            )
+            setShowNotifications(false)
           }
         />
       )}
 
+      {/* ==================================================
+          PROFILE MESSAGE
+      ================================================== */}
+
+      {profileMessage && (
+        <div
+          className="message"
+          style={{
+            position: "fixed",
+            top: "85px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 10001,
+            minWidth: "280px",
+            textAlign: "center",
+          }}
+        >
+          {profileMessage}
+        </div>
+      )}
+
+      {/* ==================================================
+          EDIT PROFILE MODAL
+      ================================================== */}
+
+      {showEditProfile && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background:
+              "rgba(0,0,0,0.65)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000,
+            padding: "20px",
+          }}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "min(500px, 100%)",
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+
+            <h2>
+              ?? Edit Profile
+            </h2>
+
+            <form
+              onSubmit={updateProfile}
+            >
+
+              <input
+                type="text"
+                name="name"
+                placeholder="Full Name"
+                value={profileForm.name}
+                onChange={
+                  handleProfileChange
+                }
+                required
+                disabled={profileLoading}
+              />
+
+              <input
+                type="email"
+                name="email"
+                placeholder="Email"
+                value={profileForm.email}
+                onChange={
+                  handleProfileChange
+                }
+                required
+                disabled={profileLoading}
+              />
+
+              <input
+                type="tel"
+                name="phone"
+                placeholder="Phone Number"
+                value={profileForm.phone}
+                onChange={
+                  handleProfileChange
+                }
+                required
+                disabled={profileLoading}
+              />
+
+              <input
+                type="text"
+                name="address"
+                placeholder="Address / Location"
+                value={profileForm.address}
+                onChange={
+                  handleProfileChange
+                }
+                required
+                disabled={profileLoading}
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  marginTop: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+
+                <button
+                  className="primary-btn"
+                  type="submit"
+                  disabled={profileLoading}
+                  style={{
+                    flex: 1,
+                  }}
+                >
+                  {profileLoading
+                    ? "Saving..."
+                    : "Save Changes"}
+                </button>
+
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  onClick={() =>
+                    setShowEditProfile(false)
+                  }
+                  disabled={profileLoading}
+                  style={{
+                    flex: 1,
+                  }}
+                >
+                  Cancel
+                </button>
+
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================
+          CHANGE PASSWORD MODAL
+      ================================================== */}
+
+      {showChangePassword && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background:
+              "rgba(0,0,0,0.65)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000,
+            padding: "20px",
+          }}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "min(500px, 100%)",
+            }}
+          >
+
+            <h2>
+              ?? Change Password
+            </h2>
+
+            <form
+              onSubmit={changePassword}
+            >
+
+              <input
+                type="password"
+                placeholder="New Password"
+                value={
+                  passwordForm.newPassword
+                }
+                onChange={(e) =>
+                  setPasswordForm({
+                    ...passwordForm,
+                    newPassword:
+                      e.target.value,
+                  })
+                }
+                required
+                disabled={profileLoading}
+                autoComplete="new-password"
+              />
+
+              <input
+                type="password"
+                placeholder="Confirm New Password"
+                value={
+                  passwordForm.confirmPassword
+                }
+                onChange={(e) =>
+                  setPasswordForm({
+                    ...passwordForm,
+                    confirmPassword:
+                      e.target.value,
+                  })
+                }
+                required
+                disabled={profileLoading}
+                autoComplete="new-password"
+              />
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  marginTop: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+
+                <button
+                  className="primary-btn"
+                  type="submit"
+                  disabled={profileLoading}
+                  style={{
+                    flex: 1,
+                  }}
+                >
+                  {profileLoading
+                    ? "Changing..."
+                    : "Change Password"}
+                </button>
+
+                <button
+                  className="secondary-btn"
+                  type="button"
+                  onClick={() => {
+                    setShowChangePassword(false);
+                    setPasswordForm({
+                      newPassword: "",
+                      confirmPassword: "",
+                    });
+                  }}
+                  disabled={profileLoading}
+                  style={{
+                    flex: 1,
+                  }}
+                >
+                  Cancel
+                </button>
+
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================
+          DASHBOARD CONTENT
+      ================================================== */}
+
       <div className="dashboard-content">
+
         <h1>
           FoodSurplus Dashboard
         </h1>
@@ -2356,19 +2966,19 @@ function UserDashboard({
         <p className="welcome">
           Welcome,{" "}
           <strong>
-            {user.name}
+            {profileUser.name}
           </strong>
         </p>
 
         <p>
-          📞 {user.phone}
+          ?? {profileUser.phone}
         </p>
 
         {/* LOCATION STATUS */}
 
         {locationError && (
           <div className="message">
-            📍 {locationError}
+            ?? {locationError}
 
             <br />
 
@@ -2381,7 +2991,7 @@ function UserDashboard({
                 marginTop: "8px",
               }}
             >
-              🔄 Retry Location
+              ?? Retry Location
             </button>
           </div>
         )}
@@ -2396,7 +3006,7 @@ function UserDashboard({
                 "rgba(255,255,255,0.12)",
             }}
           >
-            📍{" "}
+            ??{" "}
             <strong>
               Your current location
               is enabled.
@@ -2404,7 +3014,7 @@ function UserDashboard({
 
             <br />
 
-            🚗 Every food card calculates
+            ?? Every food card calculates
             road distance and estimated
             travel time from your current
             location.
@@ -2417,9 +3027,12 @@ function UserDashboard({
           </div>
         )}
 
-        {/* TABS */}
+        {/* ==================================================
+            TABS
+        ================================================== */}
 
         <div className="tabs">
+
           <button
             className={
               tab === "donate"
@@ -2430,7 +3043,7 @@ function UserDashboard({
               setTab("donate")
             }
           >
-            🍱 Donate Food
+            ?? Donate Food
           </button>
 
           <button
@@ -2443,7 +3056,7 @@ function UserDashboard({
               setTab("available")
             }
           >
-            🍽️ Available Food
+            ??? Available Food
           </button>
 
           <button
@@ -2456,7 +3069,7 @@ function UserDashboard({
               setTab("claimed")
             }
           >
-            📦 My Claimed Food
+            ?? My Claimed Food
           </button>
 
           <button
@@ -2469,8 +3082,9 @@ function UserDashboard({
               setTab("donations")
             }
           >
-            📋 My Donations
+            ?? My Donations
           </button>
+
         </div>
 
         {/* ==================================================
@@ -2479,13 +3093,15 @@ function UserDashboard({
 
         {tab === "donate" && (
           <div className="glass-card dashboard-card">
+
             <h2>
-              🍱 Donate Surplus Food
+              ?? Donate Surplus Food
             </h2>
 
             <form
               onSubmit={addFood}
             >
+
               <input
                 name="foodName"
                 placeholder="Food Name"
@@ -2517,6 +3133,7 @@ function UserDashboard({
               </select>
 
               <div className="two-column">
+
                 <input
                   type="number"
                   name="quantity"
@@ -2556,6 +3173,7 @@ function UserDashboard({
                     Packets
                   </option>
                 </select>
+
               </div>
 
               <input
@@ -2599,6 +3217,7 @@ function UserDashboard({
               >
                 Donate Food
               </button>
+
             </form>
           </div>
         )}
@@ -2609,11 +3228,10 @@ function UserDashboard({
 
         {tab === "available" && (
           <div className="food-grid">
+
             {foods.length === 0 ? (
               <div className="glass-card empty-card">
-                <h2>
-                  🍽️
-                </h2>
+                <h2>No food available</h2>
 
                 <p>
                   No food currently
@@ -2626,8 +3244,9 @@ function UserDashboard({
                   className="glass-card food-card"
                   key={item._id}
                 >
+
                   <div className="food-icon">
-                    🍱
+                    ??
                   </div>
 
                   <h2>
@@ -2666,7 +3285,7 @@ function UserDashboard({
                   </p>
 
                   <p>
-                    📞{" "}
+                    ??{" "}
                     <strong>
                       Donor Phone:
                     </strong>{" "}
@@ -2677,13 +3296,11 @@ function UserDashboard({
 
                   {item.description && (
                     <p>
-                      {
-                        item.description
-                      }
+                      {item.description}
                     </p>
                   )}
 
-                  {/* CURRENT LOCATION ROUTE */}
+                  {/* LOCATION - PRESERVED */}
 
                   <ViewLocation
                     location={
@@ -2694,7 +3311,7 @@ function UserDashboard({
                     }
                   />
 
-                  {/* SEPARATE DISTANCE */}
+                  {/* DISTANCE - PRESERVED */}
 
                   <DistanceInfo
                     foodId={item._id}
@@ -2724,12 +3341,14 @@ function UserDashboard({
                         width: "100%",
                       }}
                     >
-                      🤝 Claim Food
+                      ?? Claim Food
                     </button>
                   )}
+
                 </div>
               ))
             )}
+
           </div>
         )}
 
@@ -2739,16 +3358,19 @@ function UserDashboard({
 
         {tab === "claimed" && (
           <div className="food-grid">
+
             {claimed.length === 0 ? (
               <div className="glass-card empty-card">
+
                 <h2>
-                  📦
+                  ??
                 </h2>
 
                 <p>
                   No claimed food
                   yet.
                 </p>
+
               </div>
             ) : (
               claimed.map((item) => (
@@ -2756,8 +3378,9 @@ function UserDashboard({
                   className="glass-card food-card"
                   key={item._id}
                 >
+
                   <div className="food-icon">
-                    ✅
+                    ?
                   </div>
 
                   <h2>
@@ -2780,7 +3403,7 @@ function UserDashboard({
                   </p>
 
                   <p>
-                    👤{" "}
+                    ??{" "}
                     <strong>
                       Donor:
                     </strong>{" "}
@@ -2790,7 +3413,7 @@ function UserDashboard({
                   </p>
 
                   <p>
-                    📞{" "}
+                    ??{" "}
                     <strong>
                       Donor Phone:
                     </strong>{" "}
@@ -2798,6 +3421,8 @@ function UserDashboard({
                       item.donorPhone ||
                       "-"}
                   </p>
+
+                  {/* LOCATION - PRESERVED */}
 
                   <ViewLocation
                     location={
@@ -2807,6 +3432,8 @@ function UserDashboard({
                       userCoords
                     }
                   />
+
+                  {/* DISTANCE - PRESERVED */}
 
                   <DistanceInfo
                     foodId={item._id}
@@ -2819,12 +3446,14 @@ function UserDashboard({
                   />
 
                   <p className="claimed-text">
-                    ✅ Successfully
+                    ? Successfully
                     Claimed
                   </p>
+
                 </div>
               ))
             )}
+
           </div>
         )}
 
@@ -2834,17 +3463,19 @@ function UserDashboard({
 
         {tab === "donations" && (
           <div className="food-grid">
-            {myDonations.length ===
-            0 ? (
+
+            {myDonations.length === 0 ? (
               <div className="glass-card empty-card">
+
                 <h2>
-                  📋
+                  ??
                 </h2>
 
                 <p>
                   You have not donated
                   any food yet.
                 </p>
+
               </div>
             ) : (
               myDonations.map(
@@ -2853,8 +3484,9 @@ function UserDashboard({
                     className="glass-card food-card"
                     key={item._id}
                   >
+
                     <div className="food-icon">
-                      🍱
+                      ??
                     </div>
 
                     <h2>
@@ -2876,6 +3508,8 @@ function UserDashboard({
                       {item.location}
                     </p>
 
+                    {/* DISTANCE - PRESERVED */}
+
                     <DistanceInfo
                       foodId={item._id}
                       location={
@@ -2896,25 +3530,22 @@ function UserDashboard({
                     {item.status ===
                       "claimed" && (
                       <>
+
                         <p>
-                          👤{" "}
+                          ??{" "}
                           <strong>
                             Receiver:
                           </strong>{" "}
-                          {item
-                            .claimedBy
-                            ?.name ||
+                          {item.claimedBy?.name ||
                             "-"}
                         </p>
 
                         <p>
-                          📞{" "}
+                          ??{" "}
                           <strong>
                             Receiver Phone:
                           </strong>{" "}
-                          {item
-                            .claimedBy
-                            ?.phone ||
+                          {item.claimedBy?.phone ||
                             "-"}
                         </p>
 
@@ -2926,8 +3557,9 @@ function UserDashboard({
                             )
                           }
                         >
-                          ✅ Mark Distributed
+                          ? Mark Distributed
                         </button>
+
                       </>
                     )}
 
@@ -2941,14 +3573,14 @@ function UserDashboard({
                           )
                         }
                       >
-                        ❌ Cancel Food
+                        ? Cancel Food
                       </button>
                     )}
 
                     {item.status ===
                       "cancelled" && (
                       <p>
-                        ❌ Food
+                        ? Food
                         Cancelled
                       </p>
                     )}
@@ -2956,16 +3588,19 @@ function UserDashboard({
                     {item.status ===
                       "distributed" && (
                       <p className="claimed-text">
-                        ✅ Food Distributed
+                        ? Food Distributed
                         Successfully
                       </p>
                     )}
+
                   </div>
                 )
               )
             )}
+
           </div>
         )}
+
       </div>
     </div>
   );
@@ -3037,7 +3672,7 @@ function AdminDashboard({
     <div className="dashboard-page admin-bg">
       <nav className="dashboard-nav">
         <div className="logo">
-          🍽️ FoodSurplus
+          ??? FoodSurplus
         </div>
 
         <div>
@@ -3070,7 +3705,7 @@ function AdminDashboard({
         <div className="stats-grid">
           <div className="glass-card stat-card">
             <span>
-              👥
+              ??
             </span>
 
             <h2>
@@ -3084,7 +3719,7 @@ function AdminDashboard({
 
           <div className="glass-card stat-card">
             <span>
-              🍱
+              ??
             </span>
 
             <h2>
@@ -3098,7 +3733,7 @@ function AdminDashboard({
 
           <div className="glass-card stat-card">
             <span>
-              🥕
+              ??
             </span>
 
             <h2>
@@ -3118,7 +3753,7 @@ function AdminDashboard({
 
           <div className="glass-card stat-card">
             <span>
-              🤝
+              ??
             </span>
 
             <h2>
@@ -3282,7 +3917,7 @@ function AdminDashboard({
 
                         <br />
 
-                        📞{" "}
+                        ??{" "}
                         {
                           food.donorId
                             ?.phone ||
@@ -3300,7 +3935,7 @@ function AdminDashboard({
 
                         <br />
 
-                        📞{" "}
+                        ??{" "}
                         {
                           food
                             .claimedBy
