@@ -195,23 +195,398 @@ function useCurrentLocation() {
 // ==================================================
 // DISTANCE + TRAVEL TIME
 // CURRENT GPS -> FOOD LOCATION
+// BACKEND ROUTE + FALLBACK GEOCODING/OSRM
 // ==================================================
+
+// --------------------------------------------------
+// LOCATION ALIASES
+// --------------------------------------------------
+
+const LOCATION_ALIASES = {
+  vizag: "Visakhapatnam, Andhra Pradesh, India",
+  visakhapatnam: "Visakhapatnam, Andhra Pradesh, India",
+
+  tuni: "Tuni, Andhra Pradesh, India",
+
+  tirupati: "Tirupati, Andhra Pradesh, India",
+
+  rajahmundry:
+    "Rajahmundry, Andhra Pradesh, India",
+
+  kadapa: "Kadapa, Andhra Pradesh, India",
+
+  mandapeta:
+    "Mandapeta, Andhra Pradesh, India",
+
+  vijayawada:
+    "Vijayawada, Andhra Pradesh, India",
+
+  chennai:
+    "Chennai, Tamil Nadu, India",
+
+  hyderabad:
+    "Hyderabad, Telangana, India",
+
+  bangalore:
+    "Bengaluru, Karnataka, India",
+
+  bengaluru:
+    "Bengaluru, Karnataka, India",
+
+  nellore:
+    "Nellore, Andhra Pradesh, India",
+
+  guntur:
+    "Guntur, Andhra Pradesh, India",
+
+  kakinada:
+    "Kakinada, Andhra Pradesh, India",
+
+  anantapur:
+    "Anantapur, Andhra Pradesh, India",
+
+  anakapalle:
+    "Anakapalle, Andhra Pradesh, India",
+
+  srikakulam:
+    "Srikakulam, Andhra Pradesh, India",
+
+  ongole:
+    "Ongole, Andhra Pradesh, India",
+
+  eluru:
+    "Eluru, Andhra Pradesh, India",
+
+  machilipatnam:
+    "Machilipatnam, Andhra Pradesh, India",
+};
+
+// --------------------------------------------------
+// GEOCODING CACHE
+// --------------------------------------------------
+
+const foodLocationCache = new Map();
+
+// --------------------------------------------------
+// GEOCODE FOOD LOCATION - SMART FALLBACK
+// --------------------------------------------------
+
+const geocodeFoodLocation = async (location) => {
+  if (!location || !location.trim()) {
+    throw new Error("Food location is not available.");
+  }
+
+  const originalLocation = location.trim();
+
+  const cacheKey = originalLocation.toLowerCase();
+
+  // ----------------------------------------------
+  // CACHE
+  // ----------------------------------------------
+
+  if (foodLocationCache.has(cacheKey)) {
+    return foodLocationCache.get(cacheKey);
+  }
+
+  // ----------------------------------------------
+  // BUILD MULTIPLE SEARCH QUERIES
+  // ----------------------------------------------
+
+  const searchQueries = [];
+
+  // 1. Exact alias
+  if (LOCATION_ALIASES[cacheKey]) {
+    searchQueries.push(
+      LOCATION_ALIASES[cacheKey]
+    );
+  }
+
+  // 2. Exact location
+  searchQueries.push(
+    `${originalLocation}, India`
+  );
+
+  // ----------------------------------------------
+  // SPECIAL CASE:
+  // MOHAN BABU UNIVERSITY / RANGAMPETA
+  // ----------------------------------------------
+
+  const lowerLocation =
+    originalLocation.toLowerCase();
+
+  if (
+    lowerLocation.includes("mohan babu") ||
+    lowerLocation.includes("rangampeta") ||
+    lowerLocation.includes("rangampet")
+  ) {
+    searchQueries.push(
+      "Mohan Babu University, Sree Sainath Nagar, Tirupati, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Sree Sainath Nagar, A Rangampet, Tirupati, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Rangampeta, Tirupati, Andhra Pradesh, India"
+    );
+
+    searchQueries.push(
+      "Tirupati, Andhra Pradesh, India"
+    );
+  }
+
+  // ----------------------------------------------
+  // GENERIC CITY FALLBACKS
+  // ----------------------------------------------
+
+  if (
+    lowerLocation.includes("tirupati")
+  ) {
+    searchQueries.push(
+      "Tirupati, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("rajahmundry")
+  ) {
+    searchQueries.push(
+      "Rajahmundry, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("vizag") ||
+    lowerLocation.includes("visakhapatnam")
+  ) {
+    searchQueries.push(
+      "Visakhapatnam, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("vijayawada")
+  ) {
+    searchQueries.push(
+      "Vijayawada, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("tuni")
+  ) {
+    searchQueries.push(
+      "Tuni, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("kadapa")
+  ) {
+    searchQueries.push(
+      "Kadapa, Andhra Pradesh, India"
+    );
+  }
+
+  if (
+    lowerLocation.includes("mandapeta")
+  ) {
+    searchQueries.push(
+      "Mandapeta, Andhra Pradesh, India"
+    );
+  }
+
+  // ----------------------------------------------
+  // REMOVE DUPLICATES
+  // ----------------------------------------------
+
+  const uniqueQueries = [
+    ...new Set(searchQueries)
+  ];
+
+  // ----------------------------------------------
+  // TRY EACH QUERY
+  // ----------------------------------------------
+
+  for (const query of uniqueQueries) {
+    try {
+      console.log(
+        "Trying geocoding query:",
+        query
+      );
+
+      const response = await axios.get(
+        "https://nominatim.openstreetmap.org/search",
+        {
+          params: {
+            q: query,
+            format: "json",
+            limit: 1,
+            addressdetails: 1,
+          },
+
+          headers: {
+            Accept: "application/json",
+            "Accept-Language": "en",
+          },
+
+          timeout: 15000,
+        }
+      );
+
+      const results = response.data;
+
+      if (
+        Array.isArray(results) &&
+        results.length > 0
+      ) {
+        const coordinates = {
+          lat: Number(results[0].lat),
+          lon: Number(results[0].lon),
+        };
+
+        if (
+          Number.isFinite(coordinates.lat) &&
+          Number.isFinite(coordinates.lon)
+        ) {
+          console.log(
+            "Location found:",
+            query,
+            coordinates
+          );
+
+          foodLocationCache.set(
+            cacheKey,
+            coordinates
+          );
+
+          return coordinates;
+        }
+      }
+    } catch (error) {
+      console.log(
+        "Geocoding query failed:",
+        query,
+        error.message
+      );
+    }
+  }
+
+  // ----------------------------------------------
+  // NOTHING FOUND
+  // ----------------------------------------------
+
+  throw new Error(
+    `Could not find location: ${originalLocation}`
+  );
+};
+// --------------------------------------------------
+// OSRM ROAD ROUTE FALLBACK
+// --------------------------------------------------
+
+const calculateOSRMRoute = async (
+  userCoords,
+  destinationCoords
+) => {
+  const url =
+    `https://router.project-osrm.org/route/v1/driving/` +
+    `${userCoords.lon},${userCoords.lat};` +
+    `${destinationCoords.lon},${destinationCoords.lat}`;
+
+  const response =
+    await axios.get(
+      url,
+      {
+        params: {
+          overview: "false",
+          steps: false,
+        },
+        timeout: 30000,
+      }
+    );
+
+  if (
+    response.data?.code !==
+      "Ok" ||
+    !response.data?.routes?.length
+  ) {
+    throw new Error(
+      "Road route could not be calculated."
+    );
+  }
+
+  const route =
+    response.data.routes[0];
+
+  const distanceKm =
+    Number(route.distance) /
+    1000;
+
+  const totalMinutes =
+    Math.round(
+      Number(route.duration) /
+        60
+    );
+
+  let travelTime = "";
+
+  if (totalMinutes < 60) {
+    travelTime =
+      `${totalMinutes} min`;
+  } else {
+    const hours =
+      Math.floor(
+        totalMinutes / 60
+      );
+
+    const minutes =
+      totalMinutes % 60;
+
+    if (minutes === 0) {
+      travelTime =
+        `${hours} hr`;
+    } else {
+      travelTime =
+        `${hours} hr ${minutes} min`;
+    }
+  }
+
+  return {
+    distanceKm,
+    travelTime,
+  };
+};
+
+// --------------------------------------------------
+// DISTANCE INFO COMPONENT
+// --------------------------------------------------
 
 function DistanceInfo({
   foodId,
   location,
   userCoords,
 }) {
-  const [info, setInfo] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [info, setInfo] =
+    useState(null);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [errorMessage, setErrorMessage] =
+    useState("");
 
   useEffect(() => {
     let cancelled = false;
 
     const calculateRoute = async () => {
-      if (!userCoords || !foodId || !location?.trim()) {
+      if (
+        !userCoords ||
+        !foodId ||
+        !location?.trim()
+      ) {
         setInfo(null);
+        setErrorMessage("");
         return;
       }
 
@@ -219,46 +594,137 @@ function DistanceInfo({
       setInfo(null);
       setErrorMessage("");
 
+      // ==================================================
+      // STEP 1
+      // TRY EXISTING BACKEND ROUTE
+      // ==================================================
+
       try {
-        const response = await axios.get(
-          `${API}/food/${foodId}/route`,
-          {
-            params: {
-              latitude: userCoords.lat,
-              longitude: userCoords.lon,
-            },
-            timeout: 30000,
-          }
+        console.log(
+          "Trying FoodSurplus backend route:",
+          location
         );
 
-        if (
-          !response.data?.success ||
-          !response.data?.route
-        ) {
-          throw new Error(
-            response.data?.message ||
-              "Unable to calculate road route."
+        const response =
+          await axios.get(
+            `${API}/food/${foodId}/route`,
+            {
+              params: {
+                latitude:
+                  userCoords.lat,
+
+                longitude:
+                  userCoords.lon,
+              },
+
+              timeout: 12000,
+            }
           );
+
+        if (
+          response.data?.success &&
+          response.data?.route
+        ) {
+          const route =
+            response.data.route;
+
+          if (
+            Number.isFinite(
+              Number(
+                route.distanceKm
+              )
+            )
+          ) {
+            if (!cancelled) {
+              setInfo({
+                distance:
+                  `${Number(
+                    route.distanceKm
+                  ).toFixed(2)} km`,
+
+                time:
+                  route.travelTime ||
+                  "Travel time unavailable",
+
+                destination:
+                  response.data
+                    .foodLocation ||
+                  location,
+              });
+            }
+
+            return;
+          }
         }
 
-        const route = response.data.route;
+        throw new Error(
+          response.data?.message ||
+            "Backend route unavailable."
+        );
+      } catch (backendError) {
+        console.log(
+          "Backend route failed. Using fallback:",
+          backendError.message
+        );
+      }
+
+      // ==================================================
+      // STEP 2
+      // FALLBACK: NOMINATIM + OSRM
+      // ==================================================
+
+      try {
+        if (!cancelled) {
+          setLoading(true);
+        }
+
+        console.log(
+          "Geocoding food location:",
+          location
+        );
+
+        const destinationCoords =
+          await geocodeFoodLocation(
+            location
+          );
+
+        console.log(
+          "Food coordinates:",
+          destinationCoords
+        );
+
+        const route =
+          await calculateOSRMRoute(
+            userCoords,
+            destinationCoords
+          );
 
         if (!cancelled) {
           setInfo({
-            distance: `${Number(route.distanceKm).toFixed(2)} km`,
-            time: route.travelTime || "Travel time unavailable",
+            distance:
+              `${Number(
+                route.distanceKm
+              ).toFixed(2)} km`,
+
+            time:
+              route.travelTime,
+
             destination:
-              response.data.foodLocation || location,
+              location,
           });
+
+          setErrorMessage("");
         }
-      } catch (error) {
-        console.log("Distance calculation error:", error);
+      } catch (fallbackError) {
+        console.log(
+          "Fallback route calculation failed:",
+          fallbackError
+        );
 
         if (!cancelled) {
           setErrorMessage(
-            error.response?.data?.message ||
-              error.message ||
-              "Unable to calculate road distance."
+            fallbackError.message ||
+              "Failed to calculate food route."
           );
         }
       } finally {
@@ -280,39 +746,112 @@ function DistanceInfo({
     userCoords?.lon,
   ]);
 
+  // ==================================================
+  // NO CURRENT LOCATION
+  // ==================================================
+
   if (!userCoords) {
     return (
-      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
-        📍 Getting your current location...
+      <div
+        style={{
+          marginTop: "10px",
+          padding: "10px",
+          borderRadius: "10px",
+          background:
+            "rgba(255,255,255,0.12)",
+        }}
+      >
+        📍 Getting your current
+        location...
       </div>
     );
   }
+
+  // ==================================================
+  // LOADING
+  // ==================================================
 
   if (loading) {
     return (
-      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
-        🔄 Calculating road distance and travel time...
+      <div
+        style={{
+          marginTop: "10px",
+          padding: "10px",
+          borderRadius: "10px",
+          background:
+            "rgba(255,255,255,0.12)",
+        }}
+      >
+        🔄 Calculating road
+        distance and travel time...
       </div>
     );
   }
 
+  // ==================================================
+  // ERROR
+  // ==================================================
+
   if (errorMessage) {
     return (
-      <div style={{ marginTop: "10px", padding: "10px", borderRadius: "10px", background: "rgba(255,255,255,0.12)" }}>
+      <div
+        style={{
+          marginTop: "10px",
+          padding: "10px",
+          borderRadius: "10px",
+          background:
+            "rgba(255,255,255,0.12)",
+        }}
+      >
         ⚠️ {errorMessage}
       </div>
     );
   }
 
-  if (!info) return null;
+  // ==================================================
+  // NO INFO
+  // ==================================================
+
+  if (!info) {
+    return null;
+  }
+
+  // ==================================================
+  // SUCCESS
+  // ==================================================
 
   return (
-    <div style={{ marginTop: "10px", padding: "12px", borderRadius: "10px", background: "rgba(255,255,255,0.15)", lineHeight: "1.8" }}>
-      📏 <strong>Road Distance:</strong> {info.distance}
+    <div
+      style={{
+        marginTop: "10px",
+        padding: "12px",
+        borderRadius: "10px",
+        background:
+          "rgba(255,255,255,0.15)",
+        lineHeight: "1.8",
+      }}
+    >
+      📏{" "}
+      <strong>
+        Road Distance:
+      </strong>{" "}
+      {info.distance}
+
       <br />
-      🚗 <strong>Estimated Travel Time:</strong> {info.time}
+
+      🚗{" "}
+      <strong>
+        Estimated Travel Time:
+      </strong>{" "}
+      {info.time}
+
       <br />
-      📍 <strong>Route Location:</strong> {info.destination}
+
+      📍{" "}
+      <strong>
+        Route Location:
+      </strong>{" "}
+      {info.destination}
     </div>
   );
 }
@@ -1370,39 +1909,6 @@ function UserDashboard({
     setNotificationCount] =
     useState(0);
 
-  // USER PROFILE MENU / EDIT PROFILE
-  const [showUserMenu, setShowUserMenu] =
-    useState(false);
-
-  const [showEditProfile, setShowEditProfile] =
-    useState(false);
-
-  const [showChangePassword, setShowChangePassword] =
-    useState(false);
-
-  const [profileUser, setProfileUser] =
-    useState(user);
-
-  const [profileForm, setProfileForm] =
-    useState({
-      name: user.name || "",
-      email: user.email || "",
-      phone: user.phone || "",
-      address: user.address || "",
-    });
-
-  const [passwordForm, setPasswordForm] =
-    useState({
-      newPassword: "",
-      confirmPassword: "",
-    });
-
-  const [profileMessage, setProfileMessage] =
-    useState("");
-
-  const [profileLoading, setProfileLoading] =
-    useState(false);
-
   const {
     userCoords,
     locationError,
@@ -1411,147 +1917,6 @@ function UserDashboard({
 
   const userId =
     user.id || user._id;
-
-  // ==================================================
-  // USER PROFILE - EDIT DETAILS
-  // ==================================================
-
-  const handleProfileChange = (e) => {
-    setProfileForm({
-      ...profileForm,
-      [e.target.name]: e.target.value,
-    });
-  };
-
-  const updateProfile = async (e) => {
-    e.preventDefault();
-
-    if (profileLoading) return;
-
-    setProfileMessage("");
-    setProfileLoading(true);
-
-    try {
-      const response = await axios.put(
-        `${API}/users/${userId}`,
-        {
-          name: profileForm.name.trim(),
-          email: profileForm.email.trim(),
-          phone: profileForm.phone.trim(),
-          address: profileForm.address.trim(),
-        },
-        { timeout: 15000 }
-      );
-
-      if (!response.data?.success) {
-        throw new Error(
-          response.data?.message ||
-            "Failed to update profile"
-        );
-      }
-
-      const updatedUser = response.data.user;
-
-      setProfileUser(updatedUser);
-
-      setProfileForm({
-        name: updatedUser.name || "",
-        email: updatedUser.email || "",
-        phone: updatedUser.phone || "",
-        address: updatedUser.address || "",
-      });
-
-      setProfileMessage(
-        "✅ Profile updated successfully!"
-      );
-
-      setShowEditProfile(false);
-      setShowUserMenu(false);
-
-      setTimeout(() => {
-        setProfileMessage("");
-      }, 3000);
-    } catch (error) {
-      setProfileMessage(
-        error.response?.data?.message ||
-          error.message ||
-          "Failed to update profile"
-      );
-    } finally {
-      setProfileLoading(false);
-    }
-  };
-
-  // ==================================================
-  // USER PROFILE - CHANGE PASSWORD
-  // ==================================================
-
-  const changePassword = async (e) => {
-    e.preventDefault();
-
-    if (profileLoading) return;
-
-    if (passwordForm.newPassword.length < 6) {
-      setProfileMessage(
-        "Password must contain at least 6 characters."
-      );
-      return;
-    }
-
-    if (
-      passwordForm.newPassword !==
-      passwordForm.confirmPassword
-    ) {
-      setProfileMessage(
-        "New password and confirm password do not match."
-      );
-      return;
-    }
-
-    setProfileMessage("");
-    setProfileLoading(true);
-
-    try {
-      const response = await axios.put(
-        `${API}/users/${userId}`,
-        {
-          password: passwordForm.newPassword,
-        },
-        { timeout: 15000 }
-      );
-
-      if (!response.data?.success) {
-        throw new Error(
-          response.data?.message ||
-            "Failed to change password"
-        );
-      }
-
-      setPasswordForm({
-        newPassword: "",
-        confirmPassword: "",
-      });
-
-      setShowChangePassword(false);
-      setShowUserMenu(false);
-
-      setProfileMessage(
-        "✅ Password changed successfully!"
-      );
-
-      setTimeout(() => {
-        setProfileMessage("");
-      }, 3000);
-    } catch (error) {
-      setProfileMessage(
-        error.response?.data?.message ||
-          error.message ||
-          "Failed to change password"
-      );
-    } finally {
-      setProfileLoading(false);
-    }
-  };
 
   // ==================================================
   // LOAD NOTIFICATION COUNT
@@ -1910,115 +2275,9 @@ function UserDashboard({
             flexWrap: "wrap",
           }}
         >
-          {/* USER PROFILE BUTTON */}
-          <div
-            style={{
-              position: "relative",
-            }}
-          >
-            <button
-              type="button"
-              className="role-badge"
-              onClick={() =>
-                setShowUserMenu((previous) => !previous)
-              }
-              style={{
-                cursor: "pointer",
-                border: "none",
-              }}
-            >
-              👤 USER ▾
-            </button>
-
-            {showUserMenu && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "48px",
-                  right: 0,
-                  width: "270px",
-                  padding: "16px",
-                  borderRadius: "16px",
-                  background: "rgba(20, 30, 25, 0.97)",
-                  backdropFilter: "blur(18px)",
-                  border: "1px solid rgba(255,255,255,0.18)",
-                  boxShadow: "0 15px 40px rgba(0,0,0,0.35)",
-                  zIndex: 10000,
-                  color: "white",
-                }}
-              >
-                <div
-                  style={{
-                    paddingBottom: "12px",
-                    marginBottom: "12px",
-                    borderBottom: "1px solid rgba(255,255,255,0.12)",
-                  }}
-                >
-                  <strong style={{ fontSize: "17px" }}>
-                    👤 {profileUser.name}
-                  </strong>
-                  <div style={{ fontSize: "13px", opacity: 0.75, marginTop: "4px", wordBreak: "break-word" }}>
-                    {profileUser.email}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileMessage("");
-                    setProfileForm({
-                      name: profileUser.name || "",
-                      email: profileUser.email || "",
-                      phone: profileUser.phone || "",
-                      address: profileUser.address || "",
-                    });
-                    setShowEditProfile(true);
-                    setShowChangePassword(false);
-                    setShowUserMenu(false);
-                  }}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    border: "none",
-                    background: "rgba(255,255,255,0.08)",
-                    color: "white",
-                    padding: "11px 12px",
-                    borderRadius: "10px",
-                    cursor: "pointer",
-                    marginBottom: "8px",
-                  }}
-                >
-                  ✏️ Edit Profile
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileMessage("");
-                    setPasswordForm({
-                      newPassword: "",
-                      confirmPassword: "",
-                    });
-                    setShowChangePassword(true);
-                    setShowEditProfile(false);
-                    setShowUserMenu(false);
-                  }}
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    border: "none",
-                    background: "rgba(255,255,255,0.08)",
-                    color: "white",
-                    padding: "11px 12px",
-                    borderRadius: "10px",
-                    cursor: "pointer",
-                  }}
-                >
-                  🔑 Change Password
-                </button>
-              </div>
-            )}
-          </div>
+          <span className="role-badge">
+            USER
+          </span>
 
           {/* NOTIFICATION BUTTON */}
 
@@ -2089,218 +2348,6 @@ function UserDashboard({
         />
       )}
 
-      {/* EDIT PROFILE MODAL */}
-      {showEditProfile && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.62)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            zIndex: 10001,
-          }}
-          onClick={() => {
-            if (!profileLoading) setShowEditProfile(false);
-          }}
-        >
-          <div
-            className="glass-card"
-            style={{
-              width: "min(520px, 100%)",
-              maxHeight: "90vh",
-              overflowY: "auto",
-              padding: "25px",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "15px" }}>
-              <h2 style={{ margin: 0 }}>✏️ Edit Profile</h2>
-              <button
-                type="button"
-                onClick={() => setShowEditProfile(false)}
-                disabled={profileLoading}
-                style={{ border: "none", background: "rgba(0,0,0,0.08)", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {profileMessage && (
-              <div className="message">{profileMessage}</div>
-            )}
-
-            <form onSubmit={updateProfile}>
-              <input
-                type="text"
-                name="name"
-                placeholder="Full Name"
-                value={profileForm.name}
-                onChange={handleProfileChange}
-                required
-                disabled={profileLoading}
-              />
-
-              <input
-                type="email"
-                name="email"
-                placeholder="Email"
-                value={profileForm.email}
-                onChange={handleProfileChange}
-                required
-                disabled={profileLoading}
-              />
-
-              <input
-                type="tel"
-                name="phone"
-                placeholder="Phone Number"
-                value={profileForm.phone}
-                onChange={handleProfileChange}
-                required
-                disabled={profileLoading}
-              />
-
-              <input
-                type="text"
-                name="address"
-                placeholder="Address / Location"
-                value={profileForm.address}
-                onChange={handleProfileChange}
-                required
-                disabled={profileLoading}
-              />
-
-              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => setShowEditProfile(false)}
-                  disabled={profileLoading}
-                  style={{ flex: 1 }}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  className="primary-btn"
-                  disabled={profileLoading}
-                  style={{ flex: 1 }}
-                >
-                  {profileLoading ? "🔄 Saving..." : "💾 Save Changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* CHANGE PASSWORD MODAL */}
-      {showChangePassword && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.62)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "20px",
-            zIndex: 10001,
-          }}
-          onClick={() => {
-            if (!profileLoading) setShowChangePassword(false);
-          }}
-        >
-          <div
-            className="glass-card"
-            style={{
-              width: "min(460px, 100%)",
-              padding: "25px",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginBottom: "15px" }}>
-              <h2 style={{ margin: 0 }}>🔑 Change Password</h2>
-              <button
-                type="button"
-                onClick={() => setShowChangePassword(false)}
-                disabled={profileLoading}
-                style={{ border: "none", background: "rgba(0,0,0,0.08)", borderRadius: "8px", padding: "7px 10px", cursor: "pointer" }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {profileMessage && (
-              <div className="message">{profileMessage}</div>
-            )}
-
-            <form onSubmit={changePassword}>
-              <input
-                type="password"
-                placeholder="New Password"
-                value={passwordForm.newPassword}
-                onChange={(e) =>
-                  setPasswordForm({
-                    ...passwordForm,
-                    newPassword: e.target.value,
-                  })
-                }
-                minLength="6"
-                required
-                disabled={profileLoading}
-                autoComplete="new-password"
-              />
-
-              <input
-                type="password"
-                placeholder="Confirm New Password"
-                value={passwordForm.confirmPassword}
-                onChange={(e) =>
-                  setPasswordForm({
-                    ...passwordForm,
-                    confirmPassword: e.target.value,
-                  })
-                }
-                minLength="6"
-                required
-                disabled={profileLoading}
-                autoComplete="new-password"
-              />
-
-              <p style={{ fontSize: "13px", opacity: 0.75 }}>
-                Password must contain at least 6 characters.
-              </p>
-
-              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => setShowChangePassword(false)}
-                  disabled={profileLoading}
-                  style={{ flex: 1 }}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  className="primary-btn"
-                  disabled={profileLoading}
-                  style={{ flex: 1 }}
-                >
-                  {profileLoading ? "🔄 Updating..." : "🔐 Update Password"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       <div className="dashboard-content">
         <h1>
           FoodSurplus Dashboard
@@ -2309,12 +2356,12 @@ function UserDashboard({
         <p className="welcome">
           Welcome,{" "}
           <strong>
-            {profileUser.name}
+            {user.name}
           </strong>
         </p>
 
         <p>
-          📞 {profileUser.phone}
+          📞 {user.phone}
         </p>
 
         {/* LOCATION STATUS */}
