@@ -1,12 +1,16 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import "./App.css";
+
 // ==================================================
 // API
+// LOCAL DEVELOPMENT  -> localhost:5000
+// RENDER DEPLOYMENT  -> Render backend
 // ==================================================
 
-const API =
-  "https://foodsurplussystem.onrender.com/api";
+const API = import.meta.env.DEV
+  ? "http://localhost:5000/api"
+  : "https://foodsurplussystem.onrender.com/api";
 
 // ==================================================
 // BACKEND WARM-UP
@@ -25,16 +29,21 @@ function useBackendWarmup() {
           "Warming up FoodSurplus backend..."
         );
 
-        await axios.get(API, {
-          timeout: 15000,
-        });
+        await axios.get(
+          import.meta.env.DEV
+            ? "http://localhost:5000"
+            : "https://foodsurplussystem.onrender.com",
+          {
+            timeout: 15000,
+          }
+        );
 
         if (!cancelled) {
           setBackendReady(true);
         }
 
         console.log(
-          "FoodSurplus backend is ready."
+          "FoodBridge backend is ready."
         );
       } catch (error) {
         console.log(
@@ -55,42 +64,120 @@ function useBackendWarmup() {
 }
 
 // ==================================================
-// DISTANCE + TRAVEL TIME
-// CURRENT GPS -> FOOD LOCATION
-// BACKEND ROUTE + FALLBACK GEOCODING/OSRM
+// GOOGLE MAPS ROUTE
+// CURRENT LOCATION -> FOOD LOCATION
 // ==================================================
 
-// --------------------------------------------------
-function useCurrentLocation() {
-  const [userCoords, setUserCoords] = useState(null);
-  const [locationError, setLocationError] = useState("");
+function FoodRouteButton({
+  location,
+  userCoords,
+}) {
+  const [opening, setOpening] =
+    useState(false);
 
-  const getCurrentLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      setLocationError("Geolocation is not supported by this browser.");
-      return;
+  if (!location) {
+    return null;
+  }
+
+  const openRoute = () => {
+    const destination =
+      encodeURIComponent(
+        location.trim()
+      );
+
+    let url = "";
+
+    if (userCoords) {
+      url =
+        "https://www.google.com/maps/dir/?api=1" +
+        `&origin=${userCoords.lat},${userCoords.lon}` +
+        `&destination=${destination}` +
+        "&travelmode=driving";
+    } else {
+      url =
+        "https://www.google.com/maps/search/?api=1&query=" +
+        destination;
     }
 
-    setLocationError("");
+    setOpening(true);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setUserCoords({
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
-        });
-      },
-      (error) => {
-        console.log("Current location error:", error.message);
-        setLocationError("Unable to get your current location. Please allow location access.");
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 60000,
-      }
+    window.open(
+      url,
+      "_blank",
+      "noopener,noreferrer"
     );
-  }, []);
+
+    setTimeout(() => {
+      setOpening(false);
+    }, 1000);
+  };
+
+  return (
+    <button
+      type="button"
+      className="secondary-btn"
+      onClick={openRoute}
+      disabled={opening}
+      style={{
+        marginTop: "10px",
+        width: "100%",
+      }}
+    >
+      {opening
+        ? "Opening Maps..."
+        : "\u{1F4CD} View Route from My Location"}
+    </button>
+  );
+}
+
+// ==================================================
+// CURRENT USER LOCATION
+// ==================================================
+
+function useCurrentLocation() {
+  const [userCoords, setUserCoords] =
+    useState(null);
+
+  const [locationError, setLocationError] =
+    useState("");
+
+  const getCurrentLocation =
+    useCallback(() => {
+      if (!navigator.geolocation) {
+        setLocationError(
+          "Geolocation is not supported by this browser."
+        );
+        return;
+      }
+
+      setLocationError("");
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserCoords({
+            lat:
+              position.coords.latitude,
+            lon:
+              position.coords.longitude,
+          });
+        },
+        (error) => {
+          console.log(
+            "Current location error:",
+            error.message
+          );
+
+          setLocationError(
+            "Unable to get your current location. Please allow location access."
+          );
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 60000,
+        }
+      );
+    }, []);
 
   useEffect(() => {
     getCurrentLocation();
@@ -99,14 +186,16 @@ function useCurrentLocation() {
   return {
     userCoords,
     locationError,
-    refreshLocation: getCurrentLocation,
+    refreshLocation:
+      getCurrentLocation,
   };
 }
+
+// ==================================================
 // LOCATION ALIASES
-// --------------------------------------------------
+// ==================================================
 
 const LOCATION_ALIASES = {
-  // Andhra Pradesh
   vizag:
     "Visakhapatnam, Andhra Pradesh, India",
 
@@ -161,648 +250,654 @@ const LOCATION_ALIASES = {
   machilipatnam:
     "Machilipatnam, Andhra Pradesh, India",
 
-  // Telangana
   hyderabad:
     "Hyderabad, Telangana, India",
 
-  // Tamil Nadu
   chennai:
     "Chennai, Tamil Nadu, India",
 
-  // Karnataka
   bangalore:
     "Bengaluru, Karnataka, India",
 
   bengaluru:
     "Bengaluru, Karnataka, India",
 
-  // Maharashtra
   mumbai:
     "Mumbai, Maharashtra, India",
 };
 
-// --------------------------------------------------
+// ==================================================
 // GEOCODING CACHE
-// --------------------------------------------------
+// ==================================================
 
-const foodLocationCache = new Map();
+const foodLocationCache =
+  new Map();
 
-// --------------------------------------------------
+// ==================================================
 // GEOCODE FOOD LOCATION
-// SMART MULTI-FALLBACK VERSION
-// --------------------------------------------------
+// ==================================================
 
-const geocodeFoodLocation = async (
-  location
-) => {
-  if (!location || !location.trim()) {
-    throw new Error(
-      "Food location is not available."
-    );
-  }
+const geocodeFoodLocation =
+  async (location) => {
+    if (
+      !location ||
+      !location.trim()
+    ) {
+      throw new Error(
+        "Food location is not available."
+      );
+    }
 
-  const originalLocation =
-    location.trim();
+    const originalLocation =
+      location.trim();
 
-  const cacheKey =
-    originalLocation.toLowerCase();
+    const cacheKey =
+      originalLocation.toLowerCase();
 
-  // ------------------------------------------------
-  // CACHE
-  // ------------------------------------------------
+    if (
+      foodLocationCache.has(
+        cacheKey
+      )
+    ) {
+      return foodLocationCache.get(
+        cacheKey
+      );
+    }
 
-  if (
-    foodLocationCache.has(cacheKey)
-  ) {
-    return foodLocationCache.get(
+    const searchQueries = [];
+
+    const normalizedLocation =
       cacheKey
-    );
-  }
+        .replace(/\s+/g, " ")
+        .trim();
 
-  // ------------------------------------------------
-  // BUILD SEARCH QUERIES
-  // ------------------------------------------------
-
-  const searchQueries = [];
-
-  const normalizedLocation =
-    cacheKey
-      .replace(/\s+/g, " ")
-      .trim();
-
-  // 1. Exact alias
-  if (
-    LOCATION_ALIASES[
-      normalizedLocation
-    ]
-  ) {
-    searchQueries.push(
+    if (
       LOCATION_ALIASES[
         normalizedLocation
       ]
-    );
-  }
-
-  // 2. Exact user location
-  searchQueries.push(
-    `${originalLocation}, India`
-  );
-
-  // 3. Exact user location without India
-  searchQueries.push(
-    originalLocation
-  );
-
-  // ------------------------------------------------
-  // SPECIAL LOCATION FALLBACKS
-  // ------------------------------------------------
-
-  if (
-    normalizedLocation.includes(
-      "annavaram"
-    )
-  ) {
-    searchQueries.push(
-      "Annavaram, East Godavari, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Annavaram, Kakinada district, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Annavaram temple, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "mumbai"
-    )
-  ) {
-    searchQueries.push(
-      "Mumbai, Maharashtra, India"
-    );
-
-    searchQueries.push(
-      "Mumbai, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "chennai"
-    )
-  ) {
-    searchQueries.push(
-      "Chennai, Tamil Nadu, India"
-    );
-
-    searchQueries.push(
-      "Chennai, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "vizag"
-    ) ||
-    normalizedLocation.includes(
-      "visakhapatnam"
-    )
-  ) {
-    searchQueries.push(
-      "Visakhapatnam, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Visakhapatnam, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "kadapa"
-    )
-  ) {
-    searchQueries.push(
-      "Kadapa, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "YSR Kadapa district, Andhra Pradesh, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "mandapeta"
-    )
-  ) {
-    searchQueries.push(
-      "Mandapeta, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Mandapeta, East Godavari, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Mandapeta, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "tuni"
-    )
-  ) {
-    searchQueries.push(
-      "Tuni, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Tuni, Kakinada district, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Tuni, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "tirupati"
-    )
-  ) {
-    searchQueries.push(
-      "Tirupati, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Tirupati, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "rajahmundry"
-    )
-  ) {
-    searchQueries.push(
-      "Rajahmundry, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Rajamahendravaram, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Rajahmundry, India"
-    );
-  }
-
-  if (
-    normalizedLocation.includes(
-      "vijayawada"
-    )
-  ) {
-    searchQueries.push(
-      "Vijayawada, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Vijayawada, India"
-    );
-  }
-
-  // ------------------------------------------------
-  // MOHAN BABU UNIVERSITY / RANGAMPETA
-  // ------------------------------------------------
-
-  if (
-    normalizedLocation.includes(
-      "mohan babu"
-    ) ||
-    normalizedLocation.includes(
-      "rangampeta"
-    ) ||
-    normalizedLocation.includes(
-      "rangampet"
-    )
-  ) {
-    searchQueries.push(
-      "Mohan Babu University, Tirupati, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Sree Sainath Nagar, A Rangampet, Tirupati, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Rangampeta, Tirupati, Andhra Pradesh, India"
-    );
-
-    searchQueries.push(
-      "Tirupati, Andhra Pradesh, India"
-    );
-  }
-
-  // ------------------------------------------------
-  // REMOVE DUPLICATES
-  // ------------------------------------------------
-
-  const uniqueQueries = [
-    ...new Set(
-      searchQueries.filter(
-        Boolean
-      )
-    ),
-  ];
-
-  console.log(
-    "Geocoding location:",
-    originalLocation
-  );
-
-  console.log(
-    "Search queries:",
-    uniqueQueries
-  );
-
-  // ------------------------------------------------
-  // TRY EVERY QUERY
-  // ------------------------------------------------
-
-  for (
-    const query of uniqueQueries
-  ) {
-    try {
-      console.log(
-        "Trying:",
-        query
-      );
-
-      const response =
-        await axios.get(
-          "https://nominatim.openstreetmap.org/search",
-          {
-            params: {
-              q: query,
-              format: "json",
-              limit: 3,
-              addressdetails: 1,
-              countrycodes: "in",
-            },
-
-            headers: {
-              Accept:
-                "application/json",
-
-              "Accept-Language":
-                "en-US,en",
-            },
-
-            timeout: 15000,
-          }
-        );
-
-      const results =
-        response.data;
-
-      if (
-        Array.isArray(results) &&
-        results.length > 0
-      ) {
-        // ------------------------------------------
-        // FIND FIRST VALID COORDINATES
-        // ------------------------------------------
-
-        for (
-          const result of results
-        ) {
-          const lat =
-            Number(result.lat);
-
-          const lon =
-            Number(result.lon);
-
-          if (
-            Number.isFinite(lat) &&
-            Number.isFinite(lon)
-          ) {
-            const coordinates = {
-              lat,
-              lon,
-            };
-
-            console.log(
-              "Location found:",
-              query,
-              coordinates
-            );
-
-            foodLocationCache.set(
-              cacheKey,
-              coordinates
-            );
-
-            return coordinates;
-          }
-        }
-      }
-
-      console.log(
-        "No valid result:",
-        query
-      );
-    } catch (error) {
-      console.log(
-        "Geocoding failed:",
-        query,
-        error.message
+    ) {
+      searchQueries.push(
+        LOCATION_ALIASES[
+          normalizedLocation
+        ]
       );
     }
-  }
 
-  // ------------------------------------------------
-  // NOTHING FOUND
-  // ------------------------------------------------
+    searchQueries.push(
+      `${originalLocation}, India`
+    );
 
-  throw new Error(
-    `Could not find location: ${originalLocation}`
-  );
-};
+    searchQueries.push(
+      originalLocation
+    );
 
-// --------------------------------------------------
-// OSRM ROAD ROUTE FALLBACK
-// --------------------------------------------------
-const calculateOSRMRoute = async (
-  userCoords,
-  destinationCoords
-) => {
-  const url =
-    `https://router.project-osrm.org/route/v1/driving/` +
-    `${userCoords.lon},${userCoords.lat};` +
-    `${destinationCoords.lon},${destinationCoords.lat}`;
+    // ------------------------------------------------
+    // SPECIAL FALLBACKS
+    // ------------------------------------------------
 
-  const response =
-    await axios.get(
-      url,
-      {
+    if (
+      normalizedLocation.includes(
+        "annavaram"
+      )
+    ) {
+      searchQueries.push(
+        "Annavaram, East Godavari, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Annavaram, Kakinada district, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Annavaram temple, Andhra Pradesh, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "mumbai"
+      )
+    ) {
+      searchQueries.push(
+        "Mumbai, Maharashtra, India"
+      );
+
+      searchQueries.push(
+        "Mumbai, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "chennai"
+      )
+    ) {
+      searchQueries.push(
+        "Chennai, Tamil Nadu, India"
+      );
+
+      searchQueries.push(
+        "Chennai, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "vizag"
+      ) ||
+      normalizedLocation.includes(
+        "visakhapatnam"
+      )
+    ) {
+      searchQueries.push(
+        "Visakhapatnam, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Visakhapatnam, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "kadapa"
+      )
+    ) {
+      searchQueries.push(
+        "Kadapa, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "YSR Kadapa district, Andhra Pradesh, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "mandapeta"
+      )
+    ) {
+      searchQueries.push(
+        "Mandapeta, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Mandapeta, East Godavari, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Mandapeta, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "tuni"
+      )
+    ) {
+      searchQueries.push(
+        "Tuni, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Tuni, Kakinada district, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Tuni, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "tirupati"
+      )
+    ) {
+      searchQueries.push(
+        "Tirupati, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Tirupati, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "rajahmundry"
+      )
+    ) {
+      searchQueries.push(
+        "Rajahmundry, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Rajamahendravaram, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Rajahmundry, India"
+      );
+    }
+
+    if (
+      normalizedLocation.includes(
+        "vijayawada"
+      )
+    ) {
+      searchQueries.push(
+        "Vijayawada, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Vijayawada, India"
+      );
+    }
+
+    // ------------------------------------------------
+    // MOHAN BABU UNIVERSITY / RANGAMPETA
+    // ------------------------------------------------
+
+    if (
+      normalizedLocation.includes(
+        "mohan babu"
+      ) ||
+      normalizedLocation.includes(
+        "rangampeta"
+      ) ||
+      normalizedLocation.includes(
+        "rangampet"
+      )
+    ) {
+      searchQueries.push(
+        "Mohan Babu University, Tirupati, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Sree Sainath Nagar, A Rangampet, Tirupati, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Rangampeta, Tirupati, Andhra Pradesh, India"
+      );
+
+      searchQueries.push(
+        "Tirupati, Andhra Pradesh, India"
+      );
+    }
+
+    const uniqueQueries = [
+      ...new Set(
+        searchQueries.filter(Boolean)
+      ),
+    ];
+
+    console.log(
+      "Geocoding location:",
+      originalLocation
+    );
+
+    console.log(
+      "Search queries:",
+      uniqueQueries
+    );
+
+    for (
+      const query of uniqueQueries
+    ) {
+      try {
+        console.log(
+          "Trying:",
+          query
+        );
+
+        const response =
+          await axios.get(
+            "https://nominatim.openstreetmap.org/search",
+            {
+              params: {
+                q: query,
+                format: "json",
+                limit: 3,
+                addressdetails: 1,
+                countrycodes: "in",
+              },
+
+              headers: {
+                Accept:
+                  "application/json",
+                "Accept-Language":
+                  "en-US,en",
+              },
+
+              timeout: 15000,
+            }
+          );
+
+        const results =
+          response.data;
+
+        if (
+          Array.isArray(
+            results
+          ) &&
+          results.length > 0
+        ) {
+          for (
+            const result of results
+          ) {
+            const lat =
+              Number(result.lat);
+
+            const lon =
+              Number(result.lon);
+
+            if (
+              Number.isFinite(
+                lat
+              ) &&
+              Number.isFinite(
+                lon
+              )
+            ) {
+              const coordinates = {
+                lat,
+                lon,
+              };
+
+              console.log(
+                "Location found:",
+                query,
+                coordinates
+              );
+
+              foodLocationCache.set(
+                cacheKey,
+                coordinates
+              );
+
+              return coordinates;
+            }
+          }
+        }
+
+        console.log(
+          "No valid result:",
+          query
+        );
+      } catch (error) {
+        console.log(
+          "Geocoding failed:",
+          query,
+          error.message
+        );
+      }
+    }
+
+    throw new Error(
+      `Could not find location: ${originalLocation}`
+    );
+  };
+
+// ==================================================
+// OSRM ROAD ROUTE
+// ==================================================
+
+const calculateOSRMRoute =
+  async (
+    userCoords,
+    destinationCoords
+  ) => {
+    const url =
+      `https://router.project-osrm.org/route/v1/driving/` +
+      `${userCoords.lon},${userCoords.lat};` +
+      `${destinationCoords.lon},${destinationCoords.lat}`;
+
+    const response =
+      await axios.get(url, {
         params: {
           overview: "false",
           steps: false,
         },
         timeout: 30000,
-      }
-    );
+      });
 
-  if (
-    response.data?.code !==
-      "Ok" ||
-    !response.data?.routes?.length
-  ) {
-    throw new Error(
-      "Road route could not be calculated."
-    );
-  }
+    if (
+      response.data?.code !==
+        "Ok" ||
+      !response.data?.routes
+        ?.length
+    ) {
+      throw new Error(
+        "Road route could not be calculated."
+      );
+    }
 
-  const route =
-    response.data.routes[0];
+    const route =
+      response.data.routes[0];
 
-  const distanceKm =
-    Number(route.distance) /
-    1000;
+    const distanceKm =
+      Number(route.distance) /
+      1000;
 
-  const totalMinutes =
-    Math.round(
-      Number(route.duration) /
-        60
-    );
-
-  let travelTime = "";
-
-  if (totalMinutes < 60) {
-    travelTime =
-      `${totalMinutes} min`;
-  } else {
-    const hours =
-      Math.floor(
-        totalMinutes / 60
+    const totalMinutes =
+      Math.round(
+        Number(route.duration) /
+          60
       );
 
-    const minutes =
-      totalMinutes % 60;
+    let travelTime = "";
 
-    if (minutes === 0) {
+    if (
+      totalMinutes < 60
+    ) {
       travelTime =
-        `${hours} hr`;
+        `${totalMinutes} min`;
     } else {
-      travelTime =
-        `${hours} hr ${minutes} min`;
+      const hours =
+        Math.floor(
+          totalMinutes / 60
+        );
+
+      const minutes =
+        totalMinutes % 60;
+
+      if (minutes === 0) {
+        travelTime =
+          `${hours} hr`;
+      } else {
+        travelTime =
+          `${hours} hr ${minutes} min`;
+      }
     }
-  }
 
-  return {
-    distanceKm,
-    travelTime,
+    return {
+      distanceKm,
+      travelTime,
+    };
   };
-};
 
-// --------------------------------------------------
-// DISTANCE INFO COMPONENT
-// --------------------------------------------------
+// ==================================================
+// DISTANCE INFO
+// ==================================================
 
 function DistanceInfo({
   foodId,
   location,
   userCoords,
 }) {
-  const [info, setInfo] = useState(null);
+  const [info, setInfo] =
+    useState(null);
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] =
+    useState(false);
 
-  const [errorMessage, setErrorMessage] = useState("");
+  const [errorMessage, setErrorMessage] =
+    useState("");
 
   useEffect(() => {
     let cancelled = false;
 
-    const calculateRoute = async () => {
-      if (
-        !userCoords ||
-        !foodId ||
-        !location?.trim()
-      ) {
-        setInfo(null);
-        setErrorMessage("");
-        return;
-      }
-
-      setLoading(true);
-      setInfo(null);
-      setErrorMessage("");
-
-      // ==================================================
-      // STEP 1 - EXISTING BACKEND ROUTE
-      // ==================================================
-
-      try {
-        console.log(
-          "Trying FoodSurplus backend route:",
-          location
-        );
-
-        const response = await axios.get(
-          `${API}/food/${foodId}/route`,
-          {
-            params: {
-              latitude: userCoords.lat,
-              longitude: userCoords.lon,
-            },
-            timeout: 12000,
-          }
-        );
-
+    const calculateRoute =
+      async () => {
         if (
-          response.data?.success &&
-          response.data?.route
+          !userCoords ||
+          !foodId ||
+          !location?.trim()
         ) {
-          const route = response.data.route;
-
-          if (
-            Number.isFinite(
-              Number(route.distanceKm)
-            )
-          ) {
-            if (!cancelled) {
-              setInfo({
-                distance:
-                  `${Number(
-                    route.distanceKm
-                  ).toFixed(2)} km`,
-
-                time:
-                  route.travelTime ||
-                  "Travel time unavailable",
-
-                destination:
-                  response.data.foodLocation ||
-                  location,
-              });
-            }
-
-            return;
-          }
+          setInfo(null);
+          setErrorMessage("");
+          return;
         }
 
-        throw new Error(
-          response.data?.message ||
-            "Backend route unavailable."
-        );
-      } catch (backendError) {
-        console.log(
-          "Backend route failed. Using fallback:",
-          backendError.message
-        );
-      }
+        setLoading(true);
+        setInfo(null);
+        setErrorMessage("");
 
-      // ==================================================
-      // STEP 2 - NOMINATIM + OSRM FALLBACK
-      // ==================================================
+        // ==================================================
+        // STEP 1 - BACKEND ROUTE
+        // ==================================================
 
-      try {
-        console.log(
-          "Geocoding food location:",
-          location
-        );
+        try {
+          console.log(
+            "Trying FoodSurplus backend route:",
+            location
+          );
 
-        const destinationCoords =
-          await geocodeFoodLocation(location);
+          const response =
+            await axios.get(
+              `${API}/food/${foodId}/route`,
+              {
+                params: {
+                  latitude:
+                    userCoords.lat,
+                  longitude:
+                    userCoords.lon,
+                },
 
-        console.log(
-          "Food coordinates:",
-          destinationCoords
-        );
+                timeout: 12000,
+              }
+            );
 
-        const route =
-          await calculateOSRMRoute(
-            userCoords,
+          if (
+            response.data
+              ?.success &&
+            response.data?.route
+          ) {
+            const route =
+              response.data.route;
+
+            if (
+              Number.isFinite(
+                Number(
+                  route.distanceKm
+                )
+              )
+            ) {
+              if (!cancelled) {
+                setInfo({
+                  distance:
+                    `${Number(
+                      route.distanceKm
+                    ).toFixed(
+                      2
+                    )} km`,
+
+                  time:
+                    route.travelTime ||
+                    "Travel time unavailable",
+
+                  destination:
+                    response.data
+                      .foodLocation ||
+                    location,
+                });
+
+                setLoading(false);
+              }
+
+              return;
+            }
+          }
+
+          throw new Error(
+            response.data
+              ?.message ||
+              "Backend route unavailable."
+          );
+        } catch (
+          backendError
+        ) {
+          console.log(
+            "Backend route failed. Using fallback:",
+            backendError.message
+          );
+        }
+
+        // ==================================================
+        // STEP 2 - NOMINATIM + OSRM
+        // ==================================================
+
+        try {
+          console.log(
+            "Geocoding food location:",
+            location
+          );
+
+          const destinationCoords =
+            await geocodeFoodLocation(
+              location
+            );
+
+          console.log(
+            "Food coordinates:",
             destinationCoords
           );
 
-        if (!cancelled) {
-          setInfo({
-            distance:
-              `${Number(
-                route.distanceKm
-              ).toFixed(2)} km`,
+          const route =
+            await calculateOSRMRoute(
+              userCoords,
+              destinationCoords
+            );
 
-            time: route.travelTime,
+          if (!cancelled) {
+            setInfo({
+              distance:
+                `${Number(
+                  route.distanceKm
+                ).toFixed(
+                  2
+                )} km`,
 
-            destination: location,
-          });
+              time:
+                route.travelTime,
 
-          setErrorMessage("");
-        }
-      } catch (fallbackError) {
-        console.log(
-          "Fallback route calculation failed:",
+              destination:
+                location,
+            });
+
+            setErrorMessage("");
+          }
+        } catch (
           fallbackError
-        );
-
-        if (!cancelled) {
-          setErrorMessage(
-            fallbackError.message ||
-              "Failed to calculate food route."
+        ) {
+          console.log(
+            "Fallback route calculation failed:",
+            fallbackError
           );
+
+          if (!cancelled) {
+            setErrorMessage(
+              fallbackError.message ||
+                "Failed to calculate food route."
+            );
+          }
+        } finally {
+          if (!cancelled) {
+            setLoading(false);
+          }
         }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
+      };
 
     calculateRoute();
 
@@ -816,10 +911,6 @@ function DistanceInfo({
     userCoords?.lon,
   ]);
 
-  // ==================================================
-  // NO CURRENT LOCATION
-  // ==================================================
-
   if (!userCoords) {
     return (
       <div
@@ -831,14 +922,11 @@ function DistanceInfo({
             "rgba(255,255,255,0.12)",
         }}
       >
-        ?? Getting your current location...
+        Your current location is
+        enabled.
       </div>
     );
   }
-
-  // ==================================================
-  // LOADING
-  // ==================================================
 
   if (loading) {
     return (
@@ -851,15 +939,11 @@ function DistanceInfo({
             "rgba(255,255,255,0.12)",
         }}
       >
-        ?? Calculating road distance and travel
-        time...
+        Calculating road distance
+        and travel time...
       </div>
     );
   }
-
-  // ==================================================
-  // ERROR
-  // ==================================================
 
   if (errorMessage) {
     return (
@@ -872,22 +956,14 @@ function DistanceInfo({
             "rgba(255,255,255,0.12)",
         }}
       >
-        ?? {errorMessage}
+        {"\u26A0\uFE0F"} {errorMessage}
       </div>
     );
   }
 
-  // ==================================================
-  // NO INFO
-  // ==================================================
-
   if (!info) {
     return null;
   }
-
-  // ==================================================
-  // SUCCESS
-  // ==================================================
 
   return (
     <div
@@ -900,7 +976,7 @@ function DistanceInfo({
         lineHeight: "1.8",
       }}
     >
-      ??{" "}
+      {"\u{1F4CF}"}{" "}
       <strong>
         Road Distance:
       </strong>{" "}
@@ -908,7 +984,7 @@ function DistanceInfo({
 
       <br />
 
-      ??{" "}
+      {"\u{1F697}"}{" "}
       <strong>
         Estimated Travel Time:
       </strong>{" "}
@@ -916,7 +992,7 @@ function DistanceInfo({
 
       <br />
 
-      ??{" "}
+      {"\u{1F4CD}"}{" "}
       <strong>
         Route Location:
       </strong>{" "}
@@ -933,11 +1009,15 @@ function Notifications({
   userId,
   onClose,
 }) {
-  const [notifications, setNotifications] =
-    useState([]);
+  const [
+    notifications,
+    setNotifications,
+  ] = useState([]);
 
-  const [unreadCount, setUnreadCount] =
-    useState(0);
+  const [
+    unreadCount,
+    setUnreadCount,
+  ] = useState(0);
 
   const [loading, setLoading] =
     useState(true);
@@ -964,13 +1044,14 @@ function Notifications({
           );
 
         const list =
-          response.data?.notifications ||
-          [];
+          response.data
+            ?.notifications || [];
 
         setNotifications(list);
 
         setUnreadCount(
-          response.data?.unreadCount ??
+          response.data
+            ?.unreadCount ??
             list.filter(
               (item) => !item.read
             ).length
@@ -982,7 +1063,8 @@ function Notifications({
         );
 
         setError(
-          error.response?.data?.message ||
+          error.response?.data
+            ?.message ||
             "Failed to load notifications"
         );
       } finally {
@@ -992,10 +1074,6 @@ function Notifications({
 
   useEffect(() => {
     loadNotifications();
-
-    // ------------------------------------------
-    // AUTO REFRESH EVERY 15 SECONDS
-    // ------------------------------------------
 
     const interval =
       setInterval(
@@ -1007,145 +1085,172 @@ function Notifications({
       clearInterval(interval);
   }, [loadNotifications]);
 
-  const markOneRead = async (
-    notificationId
-  ) => {
-    try {
-      await axios.put(
-        `${API}/notifications/${notificationId}/read`,
-        {},
-        {
-          timeout: 15000,
-        }
-      );
-
-      setNotifications(
-        (previous) =>
-          previous.map((item) =>
-            String(item._id) ===
-            String(notificationId)
-              ? {
-                  ...item,
-                  read: true,
-                }
-              : item
-          )
-      );
-
-      setUnreadCount(
-        (previous) =>
-          Math.max(0, previous - 1)
-      );
-    } catch (error) {
-      console.log(
-        "Mark notification read error:",
-        error
-      );
-    }
-  };
-
-  const markAllRead = async () => {
-    try {
-      await axios.put(
-        `${API}/notifications/${userId}/read-all`,
-        {},
-        {
-          timeout: 15000,
-        }
-      );
-
-      setNotifications(
-        (previous) =>
-          previous.map((item) => ({
-            ...item,
-            read: true,
-          }))
-      );
-
-      setUnreadCount(0);
-    } catch (error) {
-      console.log(
-        "Mark all notifications error:",
-        error
-      );
-    }
-  };
-
-  const deleteNotification = async (
-    notificationId
-  ) => {
-    try {
-      const item =
-        notifications.find(
-          (notification) =>
-            String(notification._id) ===
-            String(notificationId)
+  const markOneRead =
+    async (
+      notificationId
+    ) => {
+      try {
+        await axios.put(
+          `${API}/notifications/${notificationId}/read`,
+          {},
+          {
+            timeout: 15000,
+          }
         );
 
-      await axios.delete(
-        `${API}/notifications/${notificationId}`,
-        {
-          timeout: 15000,
-        }
-      );
+        setNotifications(
+          (previous) =>
+            previous.map(
+              (item) =>
+                String(
+                  item._id
+                ) ===
+                String(
+                  notificationId
+                )
+                  ? {
+                      ...item,
+                      read: true,
+                    }
+                  : item
+            )
+        );
 
-      setNotifications(
-        (previous) =>
-          previous.filter(
-            (notification) =>
-              String(notification._id) !==
-              String(notificationId)
-          )
-      );
-
-      if (item && !item.read) {
         setUnreadCount(
           (previous) =>
-            Math.max(0, previous - 1)
+            Math.max(
+              0,
+              previous - 1
+            )
+        );
+      } catch (error) {
+        console.log(
+          "Mark notification read error:",
+          error
         );
       }
-    } catch (error) {
-      console.log(
-        "Delete notification error:",
-        error
-      );
-    }
-  };
+    };
 
-  const getNotificationIcon = (
-    type
-  ) => {
-    switch (type) {
-      case "claim":
-        return "CLAIM";
+  const markAllRead =
+    async () => {
+      try {
+        await axios.put(
+          `${API}/notifications/${userId}/read-all`,
+          {},
+          {
+            timeout: 15000,
+          }
+        );
 
-      case "pickup":
-        return "PICKUP";
+        setNotifications(
+          (previous) =>
+            previous.map(
+              (item) => ({
+                ...item,
+                read: true,
+              })
+            )
+        );
 
-      case "cancel":
-        return "CANCEL";
+        setUnreadCount(0);
+      } catch (error) {
+        console.log(
+          "Mark all notifications error:",
+          error
+        );
+      }
+    };
 
-      case "distribution":
-        return "DISTRIBUTED";
+  const deleteNotification =
+    async (
+      notificationId
+    ) => {
+      try {
+        const item =
+          notifications.find(
+            (notification) =>
+              String(
+                notification._id
+              ) ===
+              String(
+                notificationId
+              )
+          );
 
-      default:
-        return "NOTICE";
-    }
-  };
+        await axios.delete(
+          `${API}/notifications/${notificationId}`,
+          {
+            timeout: 15000,
+          }
+        );
 
-  const formatDate = (date) => {
-    if (!date) {
-      return "";
-    }
+        setNotifications(
+          (previous) =>
+            previous.filter(
+              (notification) =>
+                String(
+                  notification._id
+                ) !==
+                String(
+                  notificationId
+                )
+            )
+        );
 
-    try {
-      return new Date(
-        date
-      ).toLocaleString();
-    } catch {
-      return "";
-    }
-  };
+        if (
+          item &&
+          !item.read
+        ) {
+          setUnreadCount(
+            (previous) =>
+              Math.max(
+                0,
+                previous - 1
+              )
+          );
+        }
+      } catch (error) {
+        console.log(
+          "Delete notification error:",
+          error
+        );
+      }
+    };
+
+  const getNotificationIcon =
+    (type) => {
+      switch (type) {
+        case "claim":
+          return "\u{1F91D}";
+
+        case "pickup":
+          return "\u{1F4E6}";
+
+        case "cancel":
+          return "\u274C";
+
+        case "distribution":
+          return "\u2705";
+
+        default:
+          return "\u{1F514}";
+      }
+    };
+
+  const formatDate =
+    (date) => {
+      if (!date) {
+        return "";
+      }
+
+      try {
+        return new Date(
+          date
+        ).toLocaleString();
+      } catch {
+        return "";
+      }
+    };
 
   return (
     <div
@@ -1153,7 +1258,8 @@ function Notifications({
         position: "fixed",
         top: "75px",
         right: "20px",
-        width: "min(420px, calc(100vw - 40px))",
+        width:
+          "min(420px, calc(100vw - 40px))",
         maxHeight: "75vh",
         overflowY: "auto",
         zIndex: 9999,
@@ -1184,7 +1290,7 @@ function Notifications({
             margin: 0,
           }}
         >
-          Notifications
+          {"\u{1F514}"} Notifications
         </h2>
 
         <button
@@ -1198,7 +1304,9 @@ function Notifications({
             padding: "7px 10px",
             cursor: "pointer",
           }}
-        > Close </button>
+        >
+          {"\u2715"}
+        </button>
       </div>
 
       <div
@@ -1220,20 +1328,22 @@ function Notifications({
         {unreadCount > 0 && (
           <button
             className="secondary-btn"
-            onClick={markAllRead}
+            onClick={
+              markAllRead
+            }
           >
-            ? Mark all as read
+            {"\u2713"} Mark all as read
           </button>
         )}
       </div>
 
       {loading ? (
         <div className="message">
-          ?? Loading notifications...
+          {"\u{1F504}"} Loading notifications...
         </div>
       ) : error ? (
         <div className="message">
-          ?? {error}
+          {"\u26A0\uFE0F"} {error}
         </div>
       ) : notifications.length ===
         0 ? (
@@ -1250,7 +1360,7 @@ function Notifications({
               marginBottom: "10px",
             }}
           >
-            ??
+            {"\u{1F515}"}
           </div>
 
           <p>
@@ -1261,10 +1371,13 @@ function Notifications({
         notifications.map(
           (notification) => (
             <div
-              key={notification._id}
+              key={
+                notification._id
+              }
               style={{
                 padding: "14px",
-                marginBottom: "10px",
+                marginBottom:
+                  "10px",
                 borderRadius: "12px",
                 background:
                   notification.read
@@ -1284,7 +1397,8 @@ function Notifications({
               >
                 <div
                   style={{
-                    fontSize: "25px",
+                    fontSize:
+                      "25px",
                   }}
                 >
                   {getNotificationIcon(
@@ -1298,14 +1412,18 @@ function Notifications({
                   }}
                 >
                   <strong>
-                    {notification.title}
+                    {
+                      notification.title
+                    }
                   </strong>
 
                   {!notification.read && (
                     <span
                       style={{
-                        marginLeft: "8px",
-                        fontSize: "11px",
+                        marginLeft:
+                          "8px",
+                        fontSize:
+                          "11px",
                         padding:
                           "3px 7px",
                         borderRadius:
@@ -1343,7 +1461,8 @@ function Notifications({
                     style={{
                       display: "flex",
                       gap: "7px",
-                      marginTop: "10px",
+                      marginTop:
+                        "10px",
                       flexWrap:
                         "wrap",
                     }}
@@ -1357,7 +1476,7 @@ function Notifications({
                           )
                         }
                       >
-                        ? Read
+                        {"\u2713"} Read
                       </button>
                     )}
 
@@ -1369,7 +1488,7 @@ function Notifications({
                         )
                       }
                     >
-                      ?? Delete
+                      {"\u{1F5D1}"} Delete
                     </button>
                   </div>
                 </div>
@@ -1403,57 +1522,60 @@ function Login({
   const [loading, setLoading] =
     useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit =
+    async (e) => {
+      e.preventDefault();
 
-    if (loading) {
-      return;
-    }
+      if (loading) {
+        return;
+      }
 
-    setMessage("");
-    setLoading(true);
+      setMessage("");
+      setLoading(true);
 
-    try {
-      const response =
-        await axios.post(
-          `${API}/auth/login`,
-          {
-            email: email.trim(),
-            password,
-          },
-          {
-            timeout: 15000,
-          }
-        );
+      try {
+        const response =
+          await axios.post(
+            `${API}/auth/login`,
+            {
+              email:
+                email.trim(),
+              password,
+            },
+            {
+              timeout: 15000,
+            }
+          );
 
-      if (
-        response.data &&
-        response.data.user
-      ) {
-        onLogin(
+        if (
+          response.data &&
           response.data.user
+        ) {
+          onLogin(
+            response.data.user
+          );
+        } else {
+          setMessage(
+            response.data
+              ?.message ||
+              "Login failed"
+          );
+        }
+      } catch (error) {
+        console.log(
+          "Login error:",
+          error
         );
-      } else {
+
         setMessage(
-          response.data?.message ||
+          error.response?.data
+            ?.message ||
             "Login failed"
         );
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.log(
-        "Login error:",
-        error
-      );
-
-      setMessage(
-        error.response?.data
-          ?.message ||
-          "Login failed"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
 
   return (
     <div className="page-background login-bg">
@@ -1463,7 +1585,7 @@ function Login({
         </h1>
 
         <p className="subtitle">
-          Login to FoodSurplus
+          Login to FoodBridge
         </p>
 
         {message && (
@@ -1509,7 +1631,7 @@ function Login({
             disabled={loading}
           >
             {loading
-              ? "Logging in..."
+              ? "\u{1F504} Logging in..."
               : "Login"}
           </button>
         </form>
@@ -1519,7 +1641,9 @@ function Login({
 
           <button
             className="text-btn"
-            onClick={goRegister}
+            onClick={
+              goRegister
+            }
             disabled={loading}
           >
             Register
@@ -1528,10 +1652,12 @@ function Login({
 
         <button
           className="admin-login-btn"
-          onClick={goAdminLogin}
+          onClick={
+            goAdminLogin
+          }
           disabled={loading}
         >
-          ?? Admin Login
+          {"\u{1F510}"} Admin Login
         </button>
       </div>
     </div>
@@ -1558,63 +1684,65 @@ function AdminLogin({
   const [loading, setLoading] =
     useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit =
+    async (e) => {
+      e.preventDefault();
 
-    if (loading) {
-      return;
-    }
-
-    setMessage("");
-    setLoading(true);
-
-    try {
-      const response =
-        await axios.post(
-          `${API}/auth/login`,
-          {
-            email: email.trim(),
-            password,
-          },
-          {
-            timeout: 15000,
-          }
-        );
-
-      if (
-        response.data.user?.role !==
-        "admin"
-      ) {
-        setMessage(
-          "Access denied. Admin account required."
-        );
+      if (loading) {
         return;
       }
 
-      onLogin(
-        response.data.user
-      );
-    } catch (error) {
-      console.log(
-        "Admin login error:",
-        error
-      );
+      setMessage("");
+      setLoading(true);
 
-      setMessage(
-        error.response?.data
-          ?.message ||
-          "Admin login failed"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        const response =
+          await axios.post(
+            `${API}/auth/login`,
+            {
+              email:
+                email.trim(),
+              password,
+            },
+            {
+              timeout: 15000,
+            }
+          );
+
+        if (
+          response.data.user
+            ?.role !== "admin"
+        ) {
+          setMessage(
+            "Access denied. Admin account required."
+          );
+          return;
+        }
+
+        onLogin(
+          response.data.user
+        );
+      } catch (error) {
+        console.log(
+          "Admin login error:",
+          error
+        );
+
+        setMessage(
+          error.response?.data
+            ?.message ||
+            "Admin login failed"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
 
   return (
     <div className="page-background login-bg">
       <div className="glass-card auth-card">
         <div className="hero-icon">
-          ??
+          {"\u{1F510}"}
         </div>
 
         <h1>
@@ -1666,7 +1794,7 @@ function AdminLogin({
             disabled={loading}
           >
             {loading
-              ? "Logging in..."
+              ? "\u{1F504} Logging in..."
               : "Admin Login"}
           </button>
         </form>
@@ -1717,43 +1845,44 @@ function Register({
     });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit =
+    async (e) => {
+      e.preventDefault();
 
-    if (loading) {
-      return;
-    }
+      if (loading) {
+        return;
+      }
 
-    setMessage("");
-    setLoading(true);
+      setMessage("");
+      setLoading(true);
 
-    try {
-      const response =
-        await axios.post(
-          `${API}/auth/register`,
-          form,
-          {
-            timeout: 15000,
-          }
+      try {
+        const response =
+          await axios.post(
+            `${API}/auth/register`,
+            form,
+            {
+              timeout: 15000,
+            }
+          );
+
+        setMessage(
+          response.data.message
         );
 
-      setMessage(
-        response.data.message
-      );
-
-      setTimeout(() => {
-        goLogin();
-      }, 1200);
-    } catch (error) {
-      setMessage(
-        error.response?.data
-          ?.message ||
-          "Registration failed"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+        setTimeout(() => {
+          goLogin();
+        }, 1200);
+      } catch (error) {
+        setMessage(
+          error.response?.data
+            ?.message ||
+            "Registration failed"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
 
   return (
     <div className="page-background register-bg">
@@ -1780,7 +1909,9 @@ function Register({
             name="name"
             placeholder="Full Name"
             value={form.name}
-            onChange={handleChange}
+            onChange={
+              handleChange
+            }
             required
             disabled={loading}
           />
@@ -1790,7 +1921,9 @@ function Register({
             name="email"
             placeholder="Email"
             value={form.email}
-            onChange={handleChange}
+            onChange={
+              handleChange
+            }
             required
             disabled={loading}
           />
@@ -1800,7 +1933,9 @@ function Register({
             name="phone"
             placeholder="Phone Number"
             value={form.phone}
-            onChange={handleChange}
+            onChange={
+              handleChange
+            }
             required
             disabled={loading}
           />
@@ -1810,7 +1945,9 @@ function Register({
             name="address"
             placeholder="Address / Location"
             value={form.address}
-            onChange={handleChange}
+            onChange={
+              handleChange
+            }
             required
             disabled={loading}
           />
@@ -1820,7 +1957,9 @@ function Register({
             name="password"
             placeholder="Password"
             value={form.password}
-            onChange={handleChange}
+            onChange={
+              handleChange
+            }
             required
             disabled={loading}
           />
@@ -1831,7 +1970,7 @@ function Register({
             disabled={loading}
           >
             {loading
-              ? "Creating..."
+              ? "\u{1F504} Creating..."
               : "Create Account"}
           </button>
         </form>
@@ -1865,7 +2004,7 @@ function Home({
     <div className="home-page">
       <nav className="navbar">
         <div className="logo">
-          ??? FoodSurplus
+          FoodSurplus
         </div>
 
         <div className="nav-buttons">
@@ -1883,9 +2022,11 @@ function Home({
 
           <button
             className="admin-nav-btn"
-            onClick={goAdminLogin}
+            onClick={
+              goAdminLogin
+            }
           >
-            ?? Admin
+            {"\u{1F510}"} Admin
           </button>
         </div>
       </nav>
@@ -1895,7 +2036,7 @@ function Home({
 
         <div className="hero-content">
           <div className="hero-icon">
-            ??
+            {"\u{1F372}"}
           </div>
 
           <p className="tagline">
@@ -1903,20 +2044,23 @@ function Home({
           </p>
 
           <h1>
-            Food Surplus System
+            FoodBridge System
           </h1>
 
           <p className="hero-description">
-            Connecting surplus food with
-            people who need it. Together,
-            we can reduce food waste and
+            Connecting surplus food
+            with people who need
+            it. Together, we can
+            reduce food waste and
             help communities.
           </p>
 
           <div className="hero-buttons">
             <button
               className="primary-btn large-btn"
-              onClick={goRegister}
+              onClick={
+                goRegister
+              }
             >
               Get Started
             </button>
@@ -1959,8 +2103,10 @@ function UserDashboard({
   const [claimed, setClaimed] =
     useState([]);
 
-  const [myDonations, setMyDonations] =
-    useState([]);
+  const [
+    myDonations,
+    setMyDonations,
+  ] = useState([]);
 
   const [tab, setTab] =
     useState("donate");
@@ -1968,51 +2114,70 @@ function UserDashboard({
   const [message, setMessage] =
     useState("");
 
-  const [showNotifications, setShowNotifications] =
-    useState(false);
+  const [
+    showNotifications,
+    setShowNotifications,
+  ] = useState(false);
 
-  const [notificationCount, setNotificationCount] =
-    useState(0);
+  const [
+    notificationCount,
+    setNotificationCount,
+  ] = useState(0);
 
   // ==================================================
-  // PROFILE STATES
+  // PROFILE
   // ==================================================
 
-  const [showUserMenu, setShowUserMenu] =
-    useState(false);
+  const [
+    showUserMenu,
+    setShowUserMenu,
+  ] = useState(false);
 
-  const [showEditProfile, setShowEditProfile] =
-    useState(false);
+  const [
+    showEditProfile,
+    setShowEditProfile,
+  ] = useState(false);
 
-  const [showChangePassword, setShowChangePassword] =
-    useState(false);
+  const [
+    showChangePassword,
+    setShowChangePassword,
+  ] = useState(false);
 
-  const [profileUser, setProfileUser] =
-    useState(user);
+  const [
+    profileUser,
+    setProfileUser,
+  ] = useState(user);
 
-  const [profileForm, setProfileForm] =
-    useState({
-      name: user.name || "",
-      email: user.email || "",
-      phone: user.phone || "",
-      address: user.address || "",
-    });
+  const [
+    profileForm,
+    setProfileForm,
+  ] = useState({
+    name: user.name || "",
+    email: user.email || "",
+    phone: user.phone || "",
+    address: user.address || "",
+  });
 
-  const [passwordForm, setPasswordForm] =
-    useState({
-      newPassword: "",
-      confirmPassword: "",
-    });
+  const [
+    passwordForm,
+    setPasswordForm,
+  ] = useState({
+    newPassword: "",
+    confirmPassword: "",
+  });
 
-  const [profileMessage, setProfileMessage] =
-    useState("");
+  const [
+    profileMessage,
+    setProfileMessage,
+  ] = useState("");
 
-  const [profileLoading, setProfileLoading] =
-    useState(false);
+  const [
+    profileLoading,
+    setProfileLoading,
+  ] = useState(false);
 
   // ==================================================
   // CURRENT LOCATION
-  // DO NOT CHANGE
   // ==================================================
 
   const {
@@ -2028,163 +2193,206 @@ function UserDashboard({
   // PROFILE INPUT
   // ==================================================
 
-  const handleProfileChange = (e) => {
-    setProfileForm({
-      ...profileForm,
-      [e.target.name]: e.target.value,
-    });
-  };
+  const handleProfileChange =
+    (e) => {
+      setProfileForm({
+        ...profileForm,
+        [e.target.name]:
+          e.target.value,
+      });
+    };
 
   // ==================================================
   // UPDATE PROFILE
   // ==================================================
 
-  const updateProfile = async (e) => {
-    e.preventDefault();
+  const updateProfile =
+    async (e) => {
+      e.preventDefault();
 
-    if (profileLoading) {
-      return;
-    }
-
-    setProfileMessage("");
-    setProfileLoading(true);
-
-    try {
-      const response =
-        await axios.put(
-          `${API}/users/${userId}`,
-          {
-            name: profileForm.name.trim(),
-            email: profileForm.email.trim(),
-            phone: profileForm.phone.trim(),
-            address: profileForm.address.trim(),
-          },
-          {
-            timeout: 15000,
-          }
-        );
-
-      if (!response.data?.success) {
-        throw new Error(
-          response.data?.message ||
-            "Failed to update profile"
-        );
+      if (profileLoading) {
+        return;
       }
 
-      const updatedUser =
-        response.data.user;
+      setProfileMessage("");
+      setProfileLoading(true);
 
-      setProfileUser(updatedUser);
+      try {
+        const response =
+          await axios.put(
+            `${API}/users/${userId}`,
+            {
+              name:
+                profileForm.name.trim(),
 
-      setProfileForm({
-        name: updatedUser.name || "",
-        email: updatedUser.email || "",
-        phone: updatedUser.phone || "",
-        address: updatedUser.address || "",
-      });
+              email:
+                profileForm.email.trim(),
 
-      setProfileMessage(
-        "Profile updated successfully!"
-      );
+              phone:
+                profileForm.phone.trim(),
 
-      setShowEditProfile(false);
-      setShowUserMenu(false);
+              address:
+                profileForm.address.trim(),
+            },
+            {
+              timeout: 15000,
+            }
+          );
 
-      setTimeout(() => {
-        setProfileMessage("");
-      }, 3000);
-    } catch (error) {
-      setProfileMessage(
-        error.response?.data?.message ||
-          error.message ||
-          "Failed to update profile"
-      );
-    } finally {
-      setProfileLoading(false);
-    }
-  };
+        if (
+          !response.data?.success
+        ) {
+          throw new Error(
+            response.data
+              ?.message ||
+              "Failed to update profile"
+          );
+        }
+
+        const updatedUser =
+          response.data.user;
+
+        setProfileUser(
+          updatedUser
+        );
+
+        setProfileForm({
+          name:
+            updatedUser.name ||
+            "",
+
+          email:
+            updatedUser.email ||
+            "",
+
+          phone:
+            updatedUser.phone ||
+            "",
+
+          address:
+            updatedUser.address ||
+            "",
+        });
+
+        setProfileMessage(
+          "\u2705 Profile updated successfully!"
+        );
+
+        setShowEditProfile(
+          false
+        );
+
+        setShowUserMenu(false);
+
+        setTimeout(() => {
+          setProfileMessage("");
+        }, 3000);
+      } catch (error) {
+        setProfileMessage(
+          error.response?.data
+            ?.message ||
+            error.message ||
+            "Failed to update profile"
+        );
+      } finally {
+        setProfileLoading(
+          false
+        );
+      }
+    };
 
   // ==================================================
   // CHANGE PASSWORD
   // ==================================================
 
-  const changePassword = async (e) => {
-    e.preventDefault();
+  const changePassword =
+    async (e) => {
+      e.preventDefault();
 
-    if (profileLoading) {
-      return;
-    }
-
-    if (
-      passwordForm.newPassword.length < 6
-    ) {
-      setProfileMessage(
-        "Password must contain at least 6 characters."
-      );
-      return;
-    }
-
-    if (
-      passwordForm.newPassword !==
-      passwordForm.confirmPassword
-    ) {
-      setProfileMessage(
-        "New password and confirm password do not match."
-      );
-      return;
-    }
-
-    setProfileMessage("");
-    setProfileLoading(true);
-
-    try {
-      const response =
-        await axios.put(
-          `${API}/users/${userId}`,
-          {
-            password:
-              passwordForm.newPassword,
-          },
-          {
-            timeout: 15000,
-          }
-        );
-
-      if (!response.data?.success) {
-        throw new Error(
-          response.data?.message ||
-            "Failed to change password"
-        );
+      if (profileLoading) {
+        return;
       }
 
-      setPasswordForm({
-        newPassword: "",
-        confirmPassword: "",
-      });
+      if (
+        passwordForm.newPassword
+          .length < 6
+      ) {
+        setProfileMessage(
+          "Password must contain at least 6 characters."
+        );
+        return;
+      }
 
-      setShowChangePassword(false);
-      setShowUserMenu(false);
+      if (
+        passwordForm.newPassword !==
+        passwordForm.confirmPassword
+      ) {
+        setProfileMessage(
+          "New password and confirm password do not match."
+        );
+        return;
+      }
 
-      setProfileMessage(
-        "Password changed successfully!"
-      );
+      setProfileMessage("");
+      setProfileLoading(true);
 
-      setTimeout(() => {
-        setProfileMessage("");
-      }, 3000);
-    } catch (error) {
-      setProfileMessage(
-        error.response?.data?.message ||
-          error.message ||
-          "Failed to change password"
-      );
-    } finally {
-      setProfileLoading(false);
-    }
-  };
+      try {
+        const response =
+          await axios.put(
+            `${API}/users/${userId}`,
+            {
+              password:
+                passwordForm.newPassword,
+            },
+            {
+              timeout: 15000,
+            }
+          );
+
+        if (
+          !response.data?.success
+        ) {
+          throw new Error(
+            response.data
+              ?.message ||
+              "Failed to change password"
+          );
+        }
+
+        setPasswordForm({
+          newPassword: "",
+          confirmPassword: "",
+        });
+
+        setShowChangePassword(
+          false
+        );
+
+        setShowUserMenu(false);
+
+        setProfileMessage(
+          "\u2705 Password changed successfully!"
+        );
+
+        setTimeout(() => {
+          setProfileMessage("");
+        }, 3000);
+      } catch (error) {
+        setProfileMessage(
+          error.response?.data
+            ?.message ||
+            error.message ||
+            "Failed to change password"
+        );
+      } finally {
+        setProfileLoading(
+          false
+        );
+      }
+    };
 
   // ==================================================
-  // LOAD NOTIFICATION COUNT
+  // NOTIFICATION COUNT
   // ==================================================
 
   const loadNotificationCount =
@@ -2203,7 +2411,8 @@ function UserDashboard({
           );
 
         setNotificationCount(
-          response.data?.unreadCount || 0
+          response.data
+            ?.unreadCount || 0
         );
       } catch (error) {
         console.log(
@@ -2229,7 +2438,8 @@ function UserDashboard({
           );
 
         setFoods(
-          response.data.foods || []
+          response.data.foods ||
+            []
         );
       } catch (error) {
         console.log(
@@ -2255,7 +2465,8 @@ function UserDashboard({
           );
 
         setClaimed(
-          response.data.foods || []
+          response.data.foods ||
+            []
         );
       } catch (error) {
         console.log(
@@ -2281,7 +2492,8 @@ function UserDashboard({
           );
 
         setMyDonations(
-          response.data.foods || []
+          response.data.foods ||
+            []
         );
       } catch (error) {
         console.log(
@@ -2330,7 +2542,7 @@ function UserDashboard({
   ]);
 
   // ==================================================
-  // INPUT CHANGE
+  // FOOD INPUT
   // ==================================================
 
   const handleChange = (e) => {
@@ -2345,137 +2557,151 @@ function UserDashboard({
   // DONATE FOOD
   // ==================================================
 
-  const addFood = async (e) => {
-    e.preventDefault();
+  const addFood =
+    async (e) => {
+      e.preventDefault();
 
-    setMessage("");
+      setMessage("");
 
-    try {
-      await axios.post(
-        `${API}/food`,
-        {
-          donorId: userId,
-          foodName: food.foodName,
-          foodType: food.foodType,
-          quantity: Number(food.quantity),
-          unit: food.unit,
-          description: food.description,
-          location: food.location,
-          expiryTime: food.expiryTime,
-        },
-        {
-          timeout: 15000,
-        }
-      );
+      try {
+        await axios.post(
+          `${API}/food`,
+          {
+            donorId: userId,
+            foodName:
+              food.foodName,
+            foodType:
+              food.foodType,
+            quantity:
+              Number(
+                food.quantity
+              ),
+            unit: food.unit,
+            description:
+              food.description,
+            location:
+              food.location,
+            expiryTime:
+              food.expiryTime,
+          },
+          {
+            timeout: 15000,
+          }
+        );
 
-      setMessage(
-        "Food donated successfully!"
-      );
+        setMessage(
+          "Food donated successfully!"
+        );
 
-      setFood({
-        foodName: "",
-        foodType: "Veg",
-        quantity: "",
-        unit: "plates",
-        description: "",
-        location: "",
-        expiryTime: "",
-      });
+        setFood({
+          foodName: "",
+          foodType: "Veg",
+          quantity: "",
+          unit: "plates",
+          description: "",
+          location: "",
+          expiryTime: "",
+        });
 
-      await loadFoods();
-      await loadMyDonations();
-      await loadNotificationCount();
+        await loadFoods();
+        await loadMyDonations();
+        await loadNotificationCount();
 
-      setTab("donations");
-    } catch (error) {
-      setMessage(
-        error.response?.data?.message ||
-          "Failed to donate food"
-      );
-    }
-  };
+        setTab("donations");
+      } catch (error) {
+        setMessage(
+          error.response?.data
+            ?.message ||
+            "Failed to donate food"
+        );
+      }
+    };
 
   // ==================================================
   // CLAIM FOOD
   // ==================================================
 
-  const claimFood = async (foodId) => {
-    try {
-      setMessage(
-        "Claiming food..."
-      );
+  const claimFood =
+    async (foodId) => {
+      try {
+        setMessage(
+          "\u{1F504} Claiming food..."
+        );
 
-      await axios.put(
-        `${API}/food/${foodId}/claim`,
-        {
-          receiverId: userId,
-        },
-        {
-          timeout: 15000,
-        }
-      );
+        await axios.put(
+          `${API}/food/${foodId}/claim`,
+          {
+            receiverId: userId,
+          },
+          {
+            timeout: 15000,
+          }
+        );
 
-      setMessage(
-        "Food claimed successfully! Notification created."
-      );
+        setMessage(
+          "\u2705 Food claimed successfully! Notification created."
+        );
 
-      await loadFoods();
-      await loadClaimed();
-      await loadMyDonations();
-      await loadNotificationCount();
+        await loadFoods();
+        await loadClaimed();
+        await loadMyDonations();
+        await loadNotificationCount();
 
-      setTab("claimed");
+        setTab("claimed");
 
-      setTimeout(() => {
-        setMessage("");
-      }, 4000);
-    } catch (error) {
-      setMessage(
-        error.response?.data?.message ||
-          "Failed to claim food"
-      );
-    }
-  };
+        setTimeout(() => {
+          setMessage("");
+        }, 4000);
+      } catch (error) {
+        setMessage(
+          error.response?.data
+            ?.message ||
+            "Failed to claim food"
+        );
+      }
+    };
 
   // ==================================================
   // CANCEL FOOD
   // ==================================================
 
-  const cancelFood = async (foodId) => {
-    const confirmCancel =
-      window.confirm(
-        "Are you sure you want to cancel this food?"
-      );
+  const cancelFood =
+    async (foodId) => {
+      const confirmCancel =
+        window.confirm(
+          "Are you sure you want to cancel this food?"
+        );
 
-    if (!confirmCancel) {
-      return;
-    }
+      if (!confirmCancel) {
+        return;
+      }
 
-    try {
-      await axios.put(
-        `${API}/food/${foodId}/cancel`,
-        {
-          userId,
-        },
-        {
-          timeout: 15000,
-        }
-      );
+      try {
+        await axios.put(
+          `${API}/food/${foodId}/cancel`,
+          {
+            userId,
+          },
+          {
+            timeout: 15000,
+          }
+        );
 
-      setMessage(
-        "Food cancelled successfully!"
-      );
+        setMessage(
+          "Food cancelled successfully!"
+        );
 
-      await loadFoods();
-      await loadMyDonations();
-      await loadNotificationCount();
-    } catch (error) {
-      setMessage(
-        error.response?.data?.message ||
-          "Failed to cancel food"
-      );
-    }
-  };
+        await loadFoods();
+        await loadMyDonations();
+        await loadNotificationCount();
+      } catch (error) {
+        setMessage(
+          error.response?.data
+            ?.message ||
+            "Failed to cancel food"
+        );
+      }
+    };
 
   // ==================================================
   // DISTRIBUTE FOOD
@@ -2503,7 +2729,8 @@ function UserDashboard({
         await loadNotificationCount();
       } catch (error) {
         setMessage(
-          error.response?.data?.message ||
+          error.response?.data
+            ?.message ||
             "Failed to distribute food"
         );
       }
@@ -2517,9 +2744,8 @@ function UserDashboard({
       ================================================== */}
 
       <nav className="dashboard-nav">
-
         <div className="logo">
-          ??? FoodSurplus
+          {"\u{1F37D}\uFE0F"} FoodSurplus
         </div>
 
         <div
@@ -2530,12 +2756,9 @@ function UserDashboard({
             flexWrap: "wrap",
           }}
         >
-
           <span className="role-badge">
             USER
           </span>
-
-          {/* NOTIFICATIONS */}
 
           <button
             onClick={() =>
@@ -2545,47 +2768,54 @@ function UserDashboard({
               )
             }
             style={{
-              position: "relative",
-              cursor: "pointer",
+              position:
+                "relative",
+              cursor:
+                "pointer",
             }}
           >
             Notifications
 
-            {notificationCount > 0 && (
+            {notificationCount >
+              0 && (
               <span
                 style={{
-                  position: "absolute",
+                  position:
+                    "absolute",
                   top: "-8px",
                   right: "-8px",
                   minWidth: "21px",
                   height: "21px",
-                  borderRadius: "50%",
-                  background: "#ef4444",
+                  borderRadius:
+                    "50%",
+                  background:
+                    "#ef4444",
                   color: "white",
-                  fontSize: "11px",
+                  fontSize:
+                    "11px",
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: "bold",
+                  alignItems:
+                    "center",
+                  justifyContent:
+                    "center",
+                  fontWeight:
+                    "bold",
                 }}
               >
-                {notificationCount > 99
+                {notificationCount >
+                99
                   ? "99+"
                   : notificationCount}
               </span>
             )}
           </button>
 
-          {/* ==================================================
-              USER PROFILE BUTTON
-          ================================================== */}
-
           <div
             style={{
-              position: "relative",
+              position:
+                "relative",
             }}
           >
-
             <button
               type="button"
               onClick={() =>
@@ -2595,27 +2825,32 @@ function UserDashboard({
                 )
               }
               style={{
-                cursor: "pointer",
-                whiteSpace: "nowrap",
+                cursor:
+                  "pointer",
+                whiteSpace:
+                  "nowrap",
               }}
             >
-              ??{" "}
+              User{" "}
               {profileUser.name ||
                 "USER"}{" "}
-              ?
+              {"\u25BC"}
             </button>
-
-            {/* PROFILE DROPDOWN */}
 
             {showUserMenu && (
               <div
                 style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
+                  position:
+                    "absolute",
+                  top:
+                    "calc(100% + 8px)",
                   right: 0,
-                  minWidth: "210px",
-                  padding: "10px",
-                  borderRadius: "14px",
+                  minWidth:
+                    "210px",
+                  padding:
+                    "10px",
+                  borderRadius:
+                    "14px",
                   background:
                     "rgba(20,20,30,0.98)",
                   backdropFilter:
@@ -2624,252 +2859,299 @@ function UserDashboard({
                     "0 15px 35px rgba(0,0,0,0.35)",
                   border:
                     "1px solid rgba(255,255,255,0.15)",
-                  zIndex: 10000,
+                  zIndex:
+                    10000,
                 }}
               >
-
                 <button
                   type="button"
                   onClick={() => {
-                    setShowEditProfile(true);
-                    setShowUserMenu(false);
-                    setProfileMessage("");
+                    setShowEditProfile(
+                      true
+                    );
+                    setShowUserMenu(
+                      false
+                    );
+                    setProfileMessage(
+                      ""
+                    );
                   }}
                   style={{
-                    width: "100%",
-                    marginBottom: "8px",
-                    textAlign: "left",
-                    cursor: "pointer",
+                    width:
+                      "100%",
+                    marginBottom:
+                      "8px",
+                    textAlign:
+                      "left",
+                    cursor:
+                      "pointer",
                   }}
                 >
-                  ?? Edit Profile
+                  {"\u270F\uFE0F"} Edit Profile
                 </button>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setShowChangePassword(true);
-                    setShowUserMenu(false);
-                    setProfileMessage("");
+                    setShowChangePassword(
+                      true
+                    );
+                    setShowUserMenu(
+                      false
+                    );
+                    setProfileMessage(
+                      ""
+                    );
                   }}
                   style={{
-                    width: "100%",
-                    textAlign: "left",
-                    cursor: "pointer",
+                    width:
+                      "100%",
+                    textAlign:
+                      "left",
+                    cursor:
+                      "pointer",
                   }}
                 >
-                  ?? Change Password
+                  {"\u{1F510}"} Change Password
                 </button>
-
               </div>
             )}
-
           </div>
-
-          {/* LOGOUT */}
 
           <button
             onClick={logout}
           >
             Logout
           </button>
-
         </div>
       </nav>
-
-      {/* ==================================================
-          NOTIFICATION PANEL
-      ================================================== */}
 
       {showNotifications && (
         <Notifications
           userId={userId}
           onClose={() =>
-            setShowNotifications(false)
+            setShowNotifications(
+              false
+            )
           }
         />
       )}
-
-      {/* ==================================================
-          PROFILE MESSAGE
-      ================================================== */}
 
       {profileMessage && (
         <div
           className="message"
           style={{
-            position: "fixed",
+            position:
+              "fixed",
             top: "85px",
             left: "50%",
-            transform: "translateX(-50%)",
+            transform:
+              "translateX(-50%)",
             zIndex: 10001,
-            minWidth: "280px",
-            textAlign: "center",
+            minWidth:
+              "280px",
+            textAlign:
+              "center",
           }}
         >
           {profileMessage}
         </div>
       )}
 
-      {/* ==================================================
-          EDIT PROFILE MODAL
-      ================================================== */}
+      {/* EDIT PROFILE */}
 
       {showEditProfile && (
         <div
           style={{
-            position: "fixed",
+            position:
+              "fixed",
             inset: 0,
             background:
               "rgba(0,0,0,0.65)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 10000,
-            padding: "20px",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            zIndex:
+              10000,
+            padding:
+              "20px",
           }}
         >
           <div
             className="glass-card"
             style={{
-              width: "min(500px, 100%)",
-              maxHeight: "90vh",
-              overflowY: "auto",
+              width:
+                "min(500px, 100%)",
+              maxHeight:
+                "90vh",
+              overflowY:
+                "auto",
             }}
           >
-
             <h2>
-              ?? Edit Profile
+              {"\u270F\uFE0F"} Edit Profile
             </h2>
 
             <form
-              onSubmit={updateProfile}
+              onSubmit={
+                updateProfile
+              }
             >
-
               <input
                 type="text"
                 name="name"
                 placeholder="Full Name"
-                value={profileForm.name}
+                value={
+                  profileForm.name
+                }
                 onChange={
                   handleProfileChange
                 }
                 required
-                disabled={profileLoading}
+                disabled={
+                  profileLoading
+                }
               />
 
               <input
                 type="email"
                 name="email"
                 placeholder="Email"
-                value={profileForm.email}
+                value={
+                  profileForm.email
+                }
                 onChange={
                   handleProfileChange
                 }
                 required
-                disabled={profileLoading}
+                disabled={
+                  profileLoading
+                }
               />
 
               <input
                 type="tel"
                 name="phone"
                 placeholder="Phone Number"
-                value={profileForm.phone}
+                value={
+                  profileForm.phone
+                }
                 onChange={
                   handleProfileChange
                 }
                 required
-                disabled={profileLoading}
+                disabled={
+                  profileLoading
+                }
               />
 
               <input
                 type="text"
                 name="address"
                 placeholder="Address / Location"
-                value={profileForm.address}
+                value={
+                  profileForm.address
+                }
                 onChange={
                   handleProfileChange
                 }
                 required
-                disabled={profileLoading}
+                disabled={
+                  profileLoading
+                }
               />
 
               <div
                 style={{
-                  display: "flex",
-                  gap: "10px",
-                  marginTop: "10px",
-                  flexWrap: "wrap",
+                  display:
+                    "flex",
+                  gap:
+                    "10px",
+                  marginTop:
+                    "10px",
+                  flexWrap:
+                    "wrap",
                 }}
               >
-
                 <button
                   className="primary-btn"
                   type="submit"
-                  disabled={profileLoading}
+                  disabled={
+                    profileLoading
+                  }
                   style={{
                     flex: 1,
                   }}
                 >
                   {profileLoading
-                    ? "Saving..."
-                    : "Save Changes"}
+                    ? "\u{1F504} Saving..."
+                    : "\u{1F4BE} Save Changes"}
                 </button>
 
                 <button
                   className="secondary-btn"
                   type="button"
                   onClick={() =>
-                    setShowEditProfile(false)
+                    setShowEditProfile(
+                      false
+                    )
                   }
-                  disabled={profileLoading}
+                  disabled={
+                    profileLoading
+                  }
                   style={{
                     flex: 1,
                   }}
                 >
                   Cancel
                 </button>
-
               </div>
-
             </form>
           </div>
         </div>
       )}
 
-      {/* ==================================================
-          CHANGE PASSWORD MODAL
-      ================================================== */}
+      {/* CHANGE PASSWORD */}
 
       {showChangePassword && (
         <div
           style={{
-            position: "fixed",
+            position:
+              "fixed",
             inset: 0,
             background:
               "rgba(0,0,0,0.65)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 10000,
-            padding: "20px",
+            display:
+              "flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            zIndex:
+              10000,
+            padding:
+              "20px",
           }}
         >
           <div
             className="glass-card"
             style={{
-              width: "min(500px, 100%)",
+              width:
+                "min(500px, 100%)",
             }}
           >
-
             <h2>
-              ?? Change Password
+              {"\u{1F510}"} Change Password
             </h2>
 
             <form
-              onSubmit={changePassword}
+              onSubmit={
+                changePassword
+              }
             >
-
               <input
                 type="password"
                 placeholder="New Password"
@@ -2877,14 +3159,18 @@ function UserDashboard({
                   passwordForm.newPassword
                 }
                 onChange={(e) =>
-                  setPasswordForm({
-                    ...passwordForm,
-                    newPassword:
-                      e.target.value,
-                  })
+                  setPasswordForm(
+                    {
+                      ...passwordForm,
+                      newPassword:
+                        e.target.value,
+                    }
+                  )
                 }
                 required
-                disabled={profileLoading}
+                disabled={
+                  profileLoading
+                }
                 autoComplete="new-password"
               />
 
@@ -2895,72 +3181,85 @@ function UserDashboard({
                   passwordForm.confirmPassword
                 }
                 onChange={(e) =>
-                  setPasswordForm({
-                    ...passwordForm,
-                    confirmPassword:
-                      e.target.value,
-                  })
+                  setPasswordForm(
+                    {
+                      ...passwordForm,
+                      confirmPassword:
+                        e.target.value,
+                    }
+                  )
                 }
                 required
-                disabled={profileLoading}
+                disabled={
+                  profileLoading
+                }
                 autoComplete="new-password"
               />
 
               <div
                 style={{
-                  display: "flex",
-                  gap: "10px",
-                  marginTop: "10px",
-                  flexWrap: "wrap",
+                  display:
+                    "flex",
+                  gap:
+                    "10px",
+                  marginTop:
+                    "10px",
+                  flexWrap:
+                    "wrap",
                 }}
               >
-
                 <button
                   className="primary-btn"
                   type="submit"
-                  disabled={profileLoading}
+                  disabled={
+                    profileLoading
+                  }
                   style={{
                     flex: 1,
                   }}
                 >
                   {profileLoading
-                    ? "Changing..."
-                    : "Change Password"}
+                    ? "\u{1F504} Changing..."
+                    : "\u{1F510} Change Password"}
                 </button>
 
                 <button
                   className="secondary-btn"
                   type="button"
                   onClick={() => {
-                    setShowChangePassword(false);
-                    setPasswordForm({
-                      newPassword: "",
-                      confirmPassword: "",
-                    });
+                    setShowChangePassword(
+                      false
+                    );
+
+                    setPasswordForm(
+                      {
+                        newPassword:
+                          "",
+                        confirmPassword:
+                          "",
+                      }
+                    );
                   }}
-                  disabled={profileLoading}
+                  disabled={
+                    profileLoading
+                  }
                   style={{
                     flex: 1,
                   }}
                 >
                   Cancel
                 </button>
-
               </div>
-
             </form>
           </div>
         </div>
       )}
 
-      {/* ==================================================
-          DASHBOARD CONTENT
-      ================================================== */}
+      {/* DASHBOARD */}
 
       <div className="dashboard-content">
-
         <h1>
-          FoodSurplus Dashboard
+          FoodBridge Dashboard
         </h1>
 
         <p className="welcome">
@@ -2971,14 +3270,13 @@ function UserDashboard({
         </p>
 
         <p>
-          ?? {profileUser.phone}
+          Phone:{" "}
+          {profileUser.phone}
         </p>
-
-        {/* LOCATION STATUS */}
 
         {locationError && (
           <div className="message">
-            ?? {locationError}
+            {"\u{1F4CD}"} {locationError}
 
             <br />
 
@@ -2988,10 +3286,11 @@ function UserDashboard({
                 refreshLocation
               }
               style={{
-                marginTop: "8px",
+                marginTop:
+                  "8px",
               }}
             >
-              ?? Retry Location
+              {"\u{1F504}"} Retry Location
             </button>
           </div>
         )}
@@ -2999,25 +3298,31 @@ function UserDashboard({
         {userCoords && (
           <div
             style={{
-              marginBottom: "15px",
-              padding: "12px",
-              borderRadius: "10px",
+              marginBottom:
+                "15px",
+              padding:
+                "12px",
+              borderRadius:
+                "10px",
               background:
                 "rgba(255,255,255,0.12)",
             }}
           >
-            ??{" "}
+            {"\u{1F4CD}"}{" "}
             <strong>
-              Your current location
-              is enabled.
+              Your current
+              location is
+              enabled.
             </strong>
 
             <br />
 
-            ?? Every food card calculates
-            road distance and estimated
-            travel time from your current
-            location.
+            {"\u{1F697}"} Every food card
+            calculates road
+            distance and
+            estimated travel
+            time from your
+            current location.
           </div>
         )}
 
@@ -3027,12 +3332,9 @@ function UserDashboard({
           </div>
         )}
 
-        {/* ==================================================
-            TABS
-        ================================================== */}
+        {/* TABS */}
 
         <div className="tabs">
-
           <button
             className={
               tab === "donate"
@@ -3043,7 +3345,7 @@ function UserDashboard({
               setTab("donate")
             }
           >
-            ?? Donate Food
+            {"\u{1F371}"} Donate Food
           </button>
 
           <button
@@ -3056,7 +3358,7 @@ function UserDashboard({
               setTab("available")
             }
           >
-            ??? Available Food
+            {"\u{1F37D}\uFE0F"} Available Food
           </button>
 
           <button
@@ -3069,7 +3371,7 @@ function UserDashboard({
               setTab("claimed")
             }
           >
-            ?? My Claimed Food
+            {"\u{1F4E6}"} My Claimed Food
           </button>
 
           <button
@@ -3082,26 +3384,21 @@ function UserDashboard({
               setTab("donations")
             }
           >
-            ?? My Donations
+            {"\u{1F4CB}"} My Donations
           </button>
-
         </div>
 
-        {/* ==================================================
-            DONATE FOOD
-        ================================================== */}
+        {/* DONATE */}
 
         {tab === "donate" && (
           <div className="glass-card dashboard-card">
-
             <h2>
-              ?? Donate Surplus Food
+              {"\u{1F371}"} Donate Food
             </h2>
 
             <form
               onSubmit={addFood}
             >
-
               <input
                 name="foodName"
                 placeholder="Food Name"
@@ -3133,7 +3430,6 @@ function UserDashboard({
               </select>
 
               <div className="two-column">
-
                 <input
                   type="number"
                   name="quantity"
@@ -3173,7 +3469,6 @@ function UserDashboard({
                     Packets
                   </option>
                 </select>
-
               </div>
 
               <input
@@ -3217,21 +3512,19 @@ function UserDashboard({
               >
                 Donate Food
               </button>
-
             </form>
           </div>
         )}
 
-        {/* ==================================================
-            AVAILABLE FOOD
-        ================================================== */}
+        {/* AVAILABLE FOOD */}
 
         {tab === "available" && (
           <div className="food-grid">
-
             {foods.length === 0 ? (
               <div className="glass-card empty-card">
-                <h2>No food available</h2>
+                <h2>
+                  {"\u{1F37D}\uFE0F"}
+                </h2>
 
                 <p>
                   No food currently
@@ -3239,254 +3532,148 @@ function UserDashboard({
                 </p>
               </div>
             ) : (
-              foods.map((item) => (
-                <div
-                  className="glass-card food-card"
-                  key={item._id}
-                >
+              foods.map(
+                (item) => (
+                  <div
+                    className="glass-card food-card"
+                    key={item._id}
+                  >
+                    <div className="food-icon">
+                      {"\u{1F371}"}
+                    </div>
 
-                  <div className="food-icon">
-                    ??
-                  </div>
+                    <h2>
+                      {item.foodName}
+                    </h2>
 
-                  <h2>
-                    {item.foodName}
-                  </h2>
-
-                  <p>
-                    <strong>
-                      Type:
-                    </strong>{" "}
-                    {item.foodType}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Quantity:
-                    </strong>{" "}
-                    {item.quantity}{" "}
-                    {item.unit}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Location:
-                    </strong>{" "}
-                    {item.location}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Donor:
-                    </strong>{" "}
-                    {item.donorName ||
-                      item.donorId?.name ||
-                      "-"}
-                  </p>
-
-                  <p>
-                    ??{" "}
-                    <strong>
-                      Donor Phone:
-                    </strong>{" "}
-                    {item.donorPhone ||
-                      item.donorId?.phone ||
-                      "-"}
-                  </p>
-
-                  {item.description && (
                     <p>
-                      {item.description}
+                      <strong>
+                        Type:
+                      </strong>{" "}
+                      {item.foodType}
                     </p>
-                  )}
 
-                  {/* LOCATION - PRESERVED */}
+                    <p>
+                      <strong>
+                        Quantity:
+                      </strong>{" "}
+                      {item.quantity}{" "}
+                      {item.unit}
+                    </p>
 
-                  <ViewLocation
-                    location={
-                      item.location
-                    }
-                    userCoords={
-                      userCoords
-                    }
-                  />
+                    <p>
+                      <strong>
+                        Location:
+                      </strong>{" "}
+                      {item.location}
+                    </p>
 
-                  {/* DISTANCE - PRESERVED */}
+                    <p>
+                      <strong>
+                        Donor:
+                      </strong>{" "}
+                      {item.donorName ||
+                        item.donorId
+                          ?.name ||
+                        "-"}
+                    </p>
 
-                  <DistanceInfo
-                    foodId={item._id}
-                    location={
-                      item.location
-                    }
-                    userCoords={
-                      userCoords
-                    }
-                  />
+                    <p>
+                      {"\u{1F4DE}"}{" "}
+                      <strong>
+                        Donor Phone:
+                      </strong>{" "}
+                      {item.donorPhone ||
+                        item.donorId
+                          ?.phone ||
+                        "-"}
+                    </p>
 
-                  {String(
-                    item.donorId?._id ||
-                      item.donorId
-                  ) !==
-                    String(userId) && (
-                    <button
-                      className="primary-btn"
-                      onClick={() =>
-                        claimFood(
-                          item._id
-                        )
+                    {item.description && (
+                      <p>
+                        {
+                          item.description
+                        }
+                      </p>
+                    )}
+
+                    <FoodRouteButton
+                      location={
+                        item.location
                       }
-                      style={{
-                        marginTop:
-                          "10px",
-                        width: "100%",
-                      }}
-                    >
-                      ?? Claim Food
-                    </button>
-                  )}
+                      userCoords={
+                        userCoords
+                      }
+                    />
 
-                </div>
-              ))
+                    <DistanceInfo
+                      foodId={
+                        item._id
+                      }
+                      location={
+                        item.location
+                      }
+                      userCoords={
+                        userCoords
+                      }
+                    />
+
+                    {String(
+                      item.donorId?._id ||
+                        item.donorId
+                    ) !==
+                      String(
+                        userId
+                      ) && (
+                      <button
+                        className="primary-btn"
+                        onClick={() =>
+                          claimFood(
+                            item._id
+                          )
+                        }
+                        style={{
+                          marginTop:
+                            "10px",
+                          width:
+                            "100%",
+                        }}
+                      >
+                        {"\u{1F91D}"} Claim Food
+                      </button>
+                    )}
+                  </div>
+                )
+              )
             )}
-
           </div>
         )}
 
-        {/* ==================================================
-            CLAIMED FOOD
-        ================================================== */}
+        {/* CLAIMED FOOD */}
 
         {tab === "claimed" && (
           <div className="food-grid">
-
-            {claimed.length === 0 ? (
+            {claimed.length ===
+            0 ? (
               <div className="glass-card empty-card">
-
                 <h2>
-                  ??
+                  {"\u{1F4E6}"}
                 </h2>
 
                 <p>
                   No claimed food
                   yet.
                 </p>
-
               </div>
             ) : (
-              claimed.map((item) => (
-                <div
-                  className="glass-card food-card"
-                  key={item._id}
-                >
-
-                  <div className="food-icon">
-                    ?
-                  </div>
-
-                  <h2>
-                    {item.foodName}
-                  </h2>
-
-                  <p>
-                    <strong>
-                      Quantity:
-                    </strong>{" "}
-                    {item.quantity}{" "}
-                    {item.unit}
-                  </p>
-
-                  <p>
-                    <strong>
-                      Location:
-                    </strong>{" "}
-                    {item.location}
-                  </p>
-
-                  <p>
-                    ??{" "}
-                    <strong>
-                      Donor:
-                    </strong>{" "}
-                    {item.donorId?.name ||
-                      item.donorName ||
-                      "-"}
-                  </p>
-
-                  <p>
-                    ??{" "}
-                    <strong>
-                      Donor Phone:
-                    </strong>{" "}
-                    {item.donorId?.phone ||
-                      item.donorPhone ||
-                      "-"}
-                  </p>
-
-                  {/* LOCATION - PRESERVED */}
-
-                  <ViewLocation
-                    location={
-                      item.location
-                    }
-                    userCoords={
-                      userCoords
-                    }
-                  />
-
-                  {/* DISTANCE - PRESERVED */}
-
-                  <DistanceInfo
-                    foodId={item._id}
-                    location={
-                      item.location
-                    }
-                    userCoords={
-                      userCoords
-                    }
-                  />
-
-                  <p className="claimed-text">
-                    ? Successfully
-                    Claimed
-                  </p>
-
-                </div>
-              ))
-            )}
-
-          </div>
-        )}
-
-        {/* ==================================================
-            MY DONATIONS
-        ================================================== */}
-
-        {tab === "donations" && (
-          <div className="food-grid">
-
-            {myDonations.length === 0 ? (
-              <div className="glass-card empty-card">
-
-                <h2>
-                  ??
-                </h2>
-
-                <p>
-                  You have not donated
-                  any food yet.
-                </p>
-
-              </div>
-            ) : (
-              myDonations.map(
+              claimed.map(
                 (item) => (
                   <div
                     className="glass-card food-card"
                     key={item._id}
                   >
-
                     <div className="food-icon">
-                      ??
+                      {"\u2705"}
                     </div>
 
                     <h2>
@@ -3508,10 +3695,110 @@ function UserDashboard({
                       {item.location}
                     </p>
 
-                    {/* DISTANCE - PRESERVED */}
+                    <p>
+                      {"\u{1F464}"}{" "}
+                      <strong>
+                        Donor:
+                      </strong>{" "}
+                      {item.donorId
+                        ?.name ||
+                        item.donorName ||
+                        "-"}
+                    </p>
+
+                    <p>
+                      {"\u{1F4DE}"}{" "}
+                      <strong>
+                        Donor Phone:
+                      </strong>{" "}
+                      {item.donorId
+                        ?.phone ||
+                        item.donorPhone ||
+                        "-"}
+                    </p>
+
+                    <FoodRouteButton
+                      location={
+                        item.location
+                      }
+                      userCoords={
+                        userCoords
+                      }
+                    />
 
                     <DistanceInfo
-                      foodId={item._id}
+                      foodId={
+                        item._id
+                      }
+                      location={
+                        item.location
+                      }
+                      userCoords={
+                        userCoords
+                      }
+                    />
+
+                    <p className="claimed-text">
+                      {"\u2705"} Successfully
+                      Claimed
+                    </p>
+                  </div>
+                )
+              )
+            )}
+          </div>
+        )}
+
+        {/* MY DONATIONS */}
+
+        {tab === "donations" && (
+          <div className="food-grid">
+            {myDonations.length ===
+            0 ? (
+              <div className="glass-card empty-card">
+                <h2>
+                  {"\u{1F4CB}"}
+                </h2>
+
+                <p>
+                  You have not donated
+                  any food yet.
+                </p>
+              </div>
+            ) : (
+              myDonations.map(
+                (item) => (
+                  <div
+                    className="glass-card food-card"
+                    key={item._id}
+                  >
+                    <div className="food-icon">
+                      {"\u{1F371}"}
+                    </div>
+
+                    <h2>
+                      {item.foodName}
+                    </h2>
+
+                    <p>
+                      <strong>
+                        Quantity:
+                      </strong>{" "}
+                      {item.quantity}{" "}
+                      {item.unit}
+                    </p>
+
+                    <p>
+                      <strong>
+                        Location:
+                      </strong>{" "}
+                      {item.location}
+                    </p>
+
+                    <DistanceInfo
+                      foodId={
+                        item._id
+                      }
                       location={
                         item.location
                       }
@@ -3530,22 +3817,23 @@ function UserDashboard({
                     {item.status ===
                       "claimed" && (
                       <>
-
                         <p>
-                          ??{" "}
+                          {"\u{1F464}"}{" "}
                           <strong>
                             Receiver:
                           </strong>{" "}
-                          {item.claimedBy?.name ||
+                          {item.claimedBy
+                            ?.name ||
                             "-"}
                         </p>
 
                         <p>
-                          ??{" "}
+                          {"\u{1F4DE}"}{" "}
                           <strong>
                             Receiver Phone:
                           </strong>{" "}
-                          {item.claimedBy?.phone ||
+                          {item.claimedBy
+                            ?.phone ||
                             "-"}
                         </p>
 
@@ -3557,9 +3845,8 @@ function UserDashboard({
                             )
                           }
                         >
-                          ? Mark Distributed
+                          {"\u2705"} Mark Distributed
                         </button>
-
                       </>
                     )}
 
@@ -3573,14 +3860,14 @@ function UserDashboard({
                           )
                         }
                       >
-                        ? Cancel Food
+                        {"\u274C"} Cancel Food
                       </button>
                     )}
 
                     {item.status ===
                       "cancelled" && (
                       <p>
-                        ? Food
+                        {"\u274C"} Food
                         Cancelled
                       </p>
                     )}
@@ -3588,19 +3875,16 @@ function UserDashboard({
                     {item.status ===
                       "distributed" && (
                       <p className="claimed-text">
-                        ? Food Distributed
+                        {"\u2705"} Food Distributed
                         Successfully
                       </p>
                     )}
-
                   </div>
                 )
               )
             )}
-
           </div>
         )}
-
       </div>
     </div>
   );
@@ -3620,40 +3904,41 @@ function AdminDashboard({
   const [foods, setFoods] =
     useState([]);
 
-  const loadData = async () => {
-    try {
-      const userResponse =
-        await axios.get(
-          `${API}/users`,
-          {
-            timeout: 15000,
-          }
+  const loadData =
+    useCallback(async () => {
+      try {
+        const userResponse =
+          await axios.get(
+            `${API}/users`,
+            {
+              timeout: 15000,
+            }
+          );
+
+        setUsers(
+          userResponse.data
+            .users || []
         );
 
-      setUsers(
-        userResponse.data.users ||
-          []
-      );
+        const foodResponse =
+          await axios.get(
+            `${API}/admin/food`,
+            {
+              timeout: 15000,
+            }
+          );
 
-      const foodResponse =
-        await axios.get(
-          `${API}/admin/food`,
-          {
-            timeout: 15000,
-          }
+        setFoods(
+          foodResponse.data
+            .foods || []
         );
-
-      setFoods(
-        foodResponse.data.foods ||
-          []
-      );
-    } catch (error) {
-      console.log(
-        "Admin load error:",
-        error
-      );
-    }
-  };
+      } catch (error) {
+        console.log(
+          "Admin load error:",
+          error
+        );
+      }
+    }, []);
 
   useEffect(() => {
     loadData();
@@ -3666,13 +3951,13 @@ function AdminDashboard({
 
     return () =>
       clearInterval(interval);
-  }, []);
+  }, [loadData]);
 
   return (
     <div className="dashboard-page admin-bg">
       <nav className="dashboard-nav">
         <div className="logo">
-          ??? FoodSurplus
+          {"\u{1F37D}\uFE0F"} FoodSurplus
         </div>
 
         <div>
@@ -3705,7 +3990,7 @@ function AdminDashboard({
         <div className="stats-grid">
           <div className="glass-card stat-card">
             <span>
-              ??
+              {"\u{1F465}"}
             </span>
 
             <h2>
@@ -3719,7 +4004,7 @@ function AdminDashboard({
 
           <div className="glass-card stat-card">
             <span>
-              ??
+              {"\u{1F371}"}
             </span>
 
             <h2>
@@ -3733,7 +4018,7 @@ function AdminDashboard({
 
           <div className="glass-card stat-card">
             <span>
-              ??
+              {"\u{1F955}"}
             </span>
 
             <h2>
@@ -3753,7 +4038,7 @@ function AdminDashboard({
 
           <div className="glass-card stat-card">
             <span>
-              ??
+              {"\u{1F91D}"}
             </span>
 
             <h2>
@@ -3917,7 +4202,7 @@ function AdminDashboard({
 
                         <br />
 
-                        ??{" "}
+                        {"\u{1F4DE}"}{" "}
                         {
                           food.donorId
                             ?.phone ||
@@ -3935,7 +4220,7 @@ function AdminDashboard({
 
                         <br />
 
-                        ??{" "}
+                        {"\u{1F4DE}"}{" "}
                         {
                           food
                             .claimedBy
@@ -3972,27 +4257,25 @@ function App() {
   const [user, setUser] =
     useState(null);
 
-  // Backend warm-up
   useBackendWarmup();
 
   // ==================================================
   // USER LOGIN
   // ==================================================
 
-  const handleLogin = (
-    loggedUser
-  ) => {
-    setUser(loggedUser);
+  const handleLogin =
+    (loggedUser) => {
+      setUser(loggedUser);
 
-    if (
-      loggedUser.role ===
-      "admin"
-    ) {
-      setPage("admin");
-    } else {
-      setPage("user");
-    }
-  };
+      if (
+        loggedUser.role ===
+        "admin"
+      ) {
+        setPage("admin");
+      } else {
+        setPage("user");
+      }
+    };
 
   // ==================================================
   // ADMIN LOGIN
@@ -4136,3 +4419,8 @@ function App() {
 }
 
 export default App;
+
+
+
+
+
