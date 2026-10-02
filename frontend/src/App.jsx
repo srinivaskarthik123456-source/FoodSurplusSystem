@@ -1363,7 +1363,7 @@ function Notifications({
             {"\u{1F515}"}
           </div>
 
-          <p>
+<p>
             No notifications yet.
           </p>
         </div>
@@ -2004,7 +2004,7 @@ function Home({
     <div className="home-page">
       <nav className="navbar">
         <div className="logo">
-          FoodSurplus
+          FoodBridge
         </div>
 
         <div className="nav-buttons">
@@ -2745,7 +2745,7 @@ function UserDashboard({
 
       <nav className="dashboard-nav">
         <div className="logo">
-          {"\u{1F37D}\uFE0F"} FoodSurplus
+          {"\u{1F37D}\uFE0F"} FoodBridge
         </div>
 
         <div
@@ -3269,7 +3269,7 @@ function UserDashboard({
           </strong>
         </p>
 
-        <p>
+        <p style={{ color: "#ffffff" }}>
           Phone:{" "}
           {profileUser.phone}
         </p>
@@ -3306,6 +3306,7 @@ function UserDashboard({
                 "10px",
               background:
                 "rgba(255,255,255,0.12)",
+              color: "#ffffff",
             }}
           >
             {"\u{1F4CD}"}{" "}
@@ -3526,7 +3527,7 @@ function UserDashboard({
                   {"\u{1F37D}\uFE0F"}
                 </h2>
 
-                <p>
+<p>
                   No food currently
                   available.
                 </p>
@@ -3546,14 +3547,14 @@ function UserDashboard({
                       {item.foodName}
                     </h2>
 
-                    <p>
+<p>
                       <strong>
                         Type:
                       </strong>{" "}
                       {item.foodType}
                     </p>
 
-                    <p>
+<p>
                       <strong>
                         Quantity:
                       </strong>{" "}
@@ -3561,14 +3562,14 @@ function UserDashboard({
                       {item.unit}
                     </p>
 
-                    <p>
+<p>
                       <strong>
                         Location:
                       </strong>{" "}
                       {item.location}
                     </p>
 
-                    <p>
+<p>
                       <strong>
                         Donor:
                       </strong>{" "}
@@ -3578,7 +3579,7 @@ function UserDashboard({
                         "-"}
                     </p>
 
-                    <p>
+<p>
                       {"\u{1F4DE}"}{" "}
                       <strong>
                         Donor Phone:
@@ -3590,7 +3591,7 @@ function UserDashboard({
                     </p>
 
                     {item.description && (
-                      <p>
+<p>
                         {
                           item.description
                         }
@@ -3660,7 +3661,7 @@ function UserDashboard({
                   {"\u{1F4E6}"}
                 </h2>
 
-                <p>
+<p>
                   No claimed food
                   yet.
                 </p>
@@ -3680,7 +3681,7 @@ function UserDashboard({
                       {item.foodName}
                     </h2>
 
-                    <p>
+<p>
                       <strong>
                         Quantity:
                       </strong>{" "}
@@ -3688,14 +3689,14 @@ function UserDashboard({
                       {item.unit}
                     </p>
 
-                    <p>
+<p>
                       <strong>
                         Location:
                       </strong>{" "}
                       {item.location}
                     </p>
 
-                    <p>
+<p>
                       {"\u{1F464}"}{" "}
                       <strong>
                         Donor:
@@ -3706,7 +3707,7 @@ function UserDashboard({
                         "-"}
                     </p>
 
-                    <p>
+<p>
                       {"\u{1F4DE}"}{" "}
                       <strong>
                         Donor Phone:
@@ -3760,7 +3761,7 @@ function UserDashboard({
                   {"\u{1F4CB}"}
                 </h2>
 
-                <p>
+<p>
                   You have not donated
                   any food yet.
                 </p>
@@ -3780,7 +3781,7 @@ function UserDashboard({
                       {item.foodName}
                     </h2>
 
-                    <p>
+<p>
                       <strong>
                         Quantity:
                       </strong>{" "}
@@ -3788,7 +3789,7 @@ function UserDashboard({
                       {item.unit}
                     </p>
 
-                    <p>
+<p>
                       <strong>
                         Location:
                       </strong>{" "}
@@ -3807,7 +3808,7 @@ function UserDashboard({
                       }
                     />
 
-                    <p>
+<p>
                       <strong>
                         Status:
                       </strong>{" "}
@@ -3817,7 +3818,7 @@ function UserDashboard({
                     {item.status ===
                       "claimed" && (
                       <>
-                        <p>
+<p>
                           {"\u{1F464}"}{" "}
                           <strong>
                             Receiver:
@@ -3827,7 +3828,7 @@ function UserDashboard({
                             "-"}
                         </p>
 
-                        <p>
+<p>
                           {"\u{1F4DE}"}{" "}
                           <strong>
                             Receiver Phone:
@@ -3866,7 +3867,7 @@ function UserDashboard({
 
                     {item.status ===
                       "cancelled" && (
-                      <p>
+<p>
                         {"\u274C"} Food
                         Cancelled
                       </p>
@@ -3957,7 +3958,7 @@ function AdminDashboard({
     <div className="dashboard-page admin-bg">
       <nav className="dashboard-nav">
         <div className="logo">
-          {"\u{1F37D}\uFE0F"} FoodSurplus
+          {"\u{1F37D}\uFE0F"} FoodBridge
         </div>
 
         <div>
@@ -3997,7 +3998,7 @@ function AdminDashboard({
               {users.length}
             </h2>
 
-            <p>
+<p>
               Total Users
             </p>
           </div>
@@ -4011,7 +4012,7 @@ function AdminDashboard({
               {foods.length}
             </h2>
 
-            <p>
+<p>
               Total Food
             </p>
           </div>
@@ -4031,7 +4032,7 @@ function AdminDashboard({
               }
             </h2>
 
-            <p>
+<p>
               Donors
             </p>
           </div>
@@ -4051,7 +4052,7 @@ function AdminDashboard({
               }
             </h2>
 
-            <p>
+<p>
               Receivers
             </p>
           </div>
@@ -4419,6 +4420,10 @@ function App() {
 }
 
 export default App;
+
+
+
+
 
 
 
